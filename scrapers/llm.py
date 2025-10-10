@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 import pandas as pd
+from tqdm import tqdm
 
 try:
 	from google import genai
@@ -99,7 +100,39 @@ def _get_client() -> Any:
 	return genai.Client(api_key=api_key)
 
 
-def evaluate_description(description: Optional[str], title: Optional[str] = None, company: Optional[str] = None, max_retries: int = 3, base_delay: float = 1.5) -> Dict[str, Any]:
+def evaluate_description(row_data: Dict[str, Any], max_retries: int = 3, base_delay: float = 1.5) -> Dict[str, Any]:
+	"""
+	Valuta un'offerta di lavoro usando tutti i campi disponibili.
+	
+	Args:
+		row_data: Dizionario con tutti i campi della riga del DataFrame
+		max_retries: Numero massimo di tentativi
+		base_delay: Delay base tra i retry
+		
+	Returns:
+		Dizionario con i risultati della valutazione LLM
+	"""
+	# Estrai i campi principali
+	description = row_data.get("description")
+	title = row_data.get("title")
+	company = row_data.get("company")
+	location = row_data.get("location")
+	job_level = row_data.get("job_level")
+	job_function = row_data.get("job_function")
+	skills = row_data.get("skills")
+	min_amount = row_data.get("min_amount")
+	max_amount = row_data.get("max_amount")
+	currency = row_data.get("currency")
+	interval = row_data.get("interval")
+	is_remote = row_data.get("is_remote")
+	work_from_home_type = row_data.get("work_from_home_type")
+	company_num_employees = row_data.get("company_num_employees")
+	company_revenue = row_data.get("company_revenue")
+	company_industries = row_data.get("company_industries")
+	company_activities = row_data.get("company_activities")
+	language_requirements = row_data.get("language_requirements")
+	role_activities = row_data.get("role_activities")
+	
 	if not description or not isinstance(description, str) or description.strip() == "":
 		return {
 			"rilevante": False,
@@ -110,12 +143,45 @@ def evaluate_description(description: Optional[str], title: Optional[str] = None
 			"segnali_negativi": ["mancanza descrizione"],
 		}
 
+	# Costruisci prompt strutturato con tutti i campi
+	structured_data = f"""
+OFFERTA DI LAVORO - DATI STRUTTURATI:
+
+IDENTIFICAZIONE:
+- Titolo: {title or 'N/A'}
+- Azienda: {company or 'N/A'}
+- Posizione: {location or 'N/A'}
+
+RUOLO E SENIORITY:
+- Livello: {job_level or 'N/A'}
+- Funzione: {job_function or 'N/A'}
+- Competenze richieste: {skills or 'N/A'}
+
+COMPENSO:
+- Range: {min_amount or 'N/A'} - {max_amount or 'N/A'} {currency or ''} ({interval or 'N/A'})
+
+MODALITÀ LAVORO:
+- Remoto: {is_remote if is_remote is not None else 'N/A'}
+- Tipo lavoro: {work_from_home_type or 'N/A'}
+
+AZIENDA:
+- Dipendenti: {company_num_employees or 'N/A'}
+- Fatturato: {company_revenue or 'N/A'}
+- Settori: {company_industries or 'N/A'}
+- Attività: {company_activities or 'N/A'}
+
+REQUISITI AGGIUNTIVI:
+- Lingue: {language_requirements or 'N/A'}
+- Attività ruolo: {role_activities or 'N/A'}
+
+DESCRIZIONE COMPLETA:
+{description}
+"""
+
 	prompt = (
-		"Valuta la seguente offerta in base alle istruzioni di sistema. "
+		"Valuta la seguente offerta di lavoro in base alle istruzioni di sistema. "
 		"Rispondi esclusivamente con JSON valido senza testo extra.\n\n" 
-		f"Titolo: {title or ''}\n"
-		f"Azienda: {company or ''}\n\n"
-		"Descrizione:\n" + description
+		+ structured_data
 	)
 
 	client = _get_client()
@@ -205,12 +271,25 @@ def enrich_dataframe_with_llm(df: pd.DataFrame) -> pd.DataFrame:
 		"llm_segnali_negativi": [],
 	}
 
-	for _, row in df.iterrows():
-		res = evaluate_description(
-			description=row.get("description"),
-			title=row.get("title"),
-			company=row.get("company"),
-		)
+	# Barra di progresso per tracciare l'elaborazione LLM
+	total_rows = len(df)
+	print(f"\n=== INIZIO ELABORAZIONE LLM ===")
+	print(f"Elaborazione di {total_rows} offerte di lavoro...")
+	
+	# Usa tqdm per la barra di progresso con informazioni dettagliate
+	progress_bar = tqdm(
+		df.iterrows(), 
+		total=total_rows,
+		desc="Elaborazione LLM",
+		unit="offerta",
+		bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
+	)
+
+	for idx, row in progress_bar:
+		# Aggiorna la descrizione della barra con il numero di riga corrente
+		progress_bar.set_description(f"Elaborazione LLM (riga {idx+1}/{total_rows})")
+		
+		res = evaluate_description(row.to_dict())
 		new_cols["llm_relevant"].append(bool(res.get("rilevante", False)))
 		new_cols["llm_score"].append(int(res.get("score", 0)))
 		new_cols["llm_motivazione"].append(str(res.get("motivazione", "")))
@@ -218,6 +297,10 @@ def enrich_dataframe_with_llm(df: pd.DataFrame) -> pd.DataFrame:
 		new_cols["llm_match_competenze"].append(json.dumps(res.get("match_competenze", []), ensure_ascii=False))
 		new_cols["llm_segnali_positivi"].append(json.dumps(res.get("segnali_positivi", []), ensure_ascii=False))
 		new_cols["llm_segnali_negativi"].append(json.dumps(res.get("segnali_negativi", []), ensure_ascii=False))
+
+	# Chiudi la barra di progresso
+	progress_bar.close()
+	print(f"=== ELABORAZIONE LLM COMPLETATA ===")
 
 	for k, v in new_cols.items():
 		df[k] = v

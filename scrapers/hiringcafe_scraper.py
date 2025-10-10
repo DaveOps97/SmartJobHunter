@@ -107,8 +107,8 @@ def normalize_hiring_cafe_jobs_to_schema(jobs: list[dict], expected_columns: lis
             if isinstance(cities, list) and cities:
                 location = ", ".join(cities)
 
-        # Data pubblicazione
-        date_posted = job_data.get("estimated_publish_date")
+        # # Data pubblicazione
+        # date_posted = job_data.get("estimated_publish_date")
 
         # Job type e remoto
         commitment_all = job_data.get("commitment")
@@ -164,7 +164,7 @@ def normalize_hiring_cafe_jobs_to_schema(jobs: list[dict], expected_columns: lis
             "title": title,
             "company": company_name,
             "location": location,
-            "date_posted": date_posted,
+            # "date_posted": date_posted,
             "job_type": job_type,
             "interval": interval,
             "min_amount": min_amount,

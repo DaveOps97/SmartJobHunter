@@ -27,44 +27,45 @@ def get_expected_columns(existing_df: pd.DataFrame = None, fallback_df: pd.DataF
     Returns:
         tuple: (expected_columns, schema_upgrade_required)
     """
-    # Nuove colonne multi-valore da HiringCafe che vogliamo includere sempre
-    EXTRA_HC_COLUMNS = [
-        'company_industries',
-        'company_activities', 
-        'language_requirements',
-        'role_activities',
-    ]
-    # Colonne arricchimento LLM
-    LLM_COLUMNS = [
-        'llm_relevant',
-        'llm_score',
-        'llm_motivazione',
-        'llm_match_competenze',
-        'llm_segnali_positivi',
-        'llm_segnali_negativi',
+    # Schema fisso definito a priori
+    FIXED_SCHEMA = [
+        # Identificatori
+        'id', 'site', 'job_url', 'job_url_direct', 'title', 'company',
+        
+        # Posizione e tempo
+        'location', 'date_posted', 'job_type', 'is_remote', 'work_from_home_type',
+        
+        # Compenso
+        'interval', 'min_amount', 'max_amount', 'currency',
+        
+        # Ruolo e competenze
+        'job_level', 'job_function', 'skills', 'description',
+        
+        # Azienda
+        'company_url', 'company_logo', 'company_num_employees', 'company_revenue', 
+        'company_description', 'company_industries', 'company_activities',
+        
+        # Campi aggiuntivi HiringCafe
+        'language_requirements', 'role_activities',
+        
+        # Colonne arricchimento LLM
+        'llm_relevant', 'llm_score', 'llm_motivazione', 
+        'llm_match_competenze', 'llm_segnali_positivi', 'llm_segnali_negativi',
+        
+        # Data di scraping
+        'data_scraping',
     ]
     
     if existing_df is not None:
-        expected_columns = list(existing_df.columns)
-    elif fallback_df is not None and not fallback_df.empty:
-        expected_columns = list(fallback_df.columns)
+        # Se esiste un CSV, usa le sue colonne ma aggiungi quelle mancanti dello schema fisso
+        existing_columns = list(existing_df.columns)
+        missing_columns = [col for col in FIXED_SCHEMA if col not in existing_columns]
+        expected_columns = existing_columns + missing_columns
+        schema_upgrade_required = len(missing_columns) > 0
     else:
-        # fallback minimo, verrà arricchito quando arriveranno dati
-        expected_columns = [
-            'id','site','job_url','job_url_direct','title','company','location','date_posted','job_type',
-            'interval','min_amount','max_amount','currency','is_remote','job_level','job_function',
-            'emails','description','company_url','company_logo',
-            'company_num_employees','company_revenue','company_description','skills',
-            'work_from_home_type'
-        ]
-    
-    # Se il CSV esistente non ha queste colonne, segniamo un upgrade di schema
-    missing_extra = [c for c in EXTRA_HC_COLUMNS if c not in expected_columns]
-    missing_llm = [c for c in LLM_COLUMNS if c not in expected_columns]
-    schema_upgrade_required = False
-    if missing_extra or missing_llm:
-        expected_columns.extend(missing_extra + missing_llm)
-        schema_upgrade_required = existing_df is not None
+        # Nessun CSV esistente: usa schema fisso
+        expected_columns = FIXED_SCHEMA.copy()
+        schema_upgrade_required = False
         
     return expected_columns, schema_upgrade_required
 
