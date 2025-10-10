@@ -5,22 +5,23 @@ Main script per il scraping di job da multiple fonti
 import pandas as pd
 from scrapers import scrape_all_locations, fetch_hiring_cafe_dataframe
 from scrapers.utils import align_columns, get_expected_columns, save_jobs_to_csv
+ 
 
 
 # Lista delle città italiane da cercare
 locations = [
         "Milano, Lombardia",      # Hub tech principale (70% job tech Italia)
-        "Torino, Piemonte",       # Automotive, fintech, AI
-        "Bologna, Emilia-Romagna", # Tech hub emergente, pharma-tech
-        "Firenze, Toscana",       # Scale-up, turismo tech
-        "Verona, Veneto",         # Logistica, manufacturing tech
-        "Genova, Liguria",        # Porto, shipping tech
-        "Brescia, Lombardia",     # Manufacturing, industria 4.0
-        "Venezia, Veneto",        # Turismo tech, port tech
-        "Padova, Veneto",         # Healthcare tech, università
-        "Parma, Emilia-Romagna",  # Food tech, automotive
-        "Roma, Lazio",            #
-        "Napoli, Campania",        #
+        # "Torino, Piemonte",       # Automotive, fintech, AI
+        # "Bologna, Emilia-Romagna", # Tech hub emergente, pharma-tech
+        # "Firenze, Toscana",       # Scale-up, turismo tech
+        # "Verona, Veneto",         # Logistica, manufacturing tech
+        # "Genova, Liguria",        # Porto, shipping tech
+        # "Brescia, Lombardia",     # Manufacturing, industria 4.0
+        # "Venezia, Veneto",        # Turismo tech, port tech
+        # "Padova, Veneto",         # Healthcare tech, università
+        # "Parma, Emilia-Romagna",  # Food tech, automotive
+        # "Roma, Lazio",            #
+        # "Napoli, Campania",        #
 ]
 
 search_term = (
@@ -37,7 +38,7 @@ def main():
     
     # === JobSpy Scraping ===
     print("=== INIZIO SCRAPING JOBSPY ===")
-    jobspy_df = scrape_all_locations(locations=locations, search_term=search_term, hours_old=168, results_wanted=100)
+    jobspy_df = scrape_all_locations(locations=locations, search_term=search_term, hours_old=168, results_wanted=10)
     
     # === HiringCafe Scraping ===
     print("\n=== INIZIO SCRAPING HIRINGCAFE ===")
@@ -68,8 +69,9 @@ def main():
     print(f"Totale raccolti (jobspy + hiring.cafe): {len(all_sources_unique)} unici")
     
     # Salvataggio finale
-    file_path = "/Users/davidelandolfi/PyProjects/ListScraper/storage/jobs_test_all_100.csv"
+    file_path = "/Users/davidelandolfi/PyProjects/ListScraper/storage/jobs_test_ai.csv"
     save_jobs_to_csv(all_sources_unique, file_path)
+
 
 
 if __name__ == "__main__":

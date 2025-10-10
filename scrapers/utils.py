@@ -3,6 +3,7 @@ Utility functions comuni per tutti gli scraper
 """
 
 import pandas as pd
+from scrapers.llm import enrich_dataframe_with_llm
 import csv
 import os
 from pathlib import Path
@@ -33,6 +34,15 @@ def get_expected_columns(existing_df: pd.DataFrame = None, fallback_df: pd.DataF
         'language_requirements',
         'role_activities',
     ]
+    # Colonne arricchimento LLM
+    LLM_COLUMNS = [
+        'llm_relevant',
+        'llm_score',
+        'llm_motivazione',
+        'llm_match_competenze',
+        'llm_segnali_positivi',
+        'llm_segnali_negativi',
+    ]
     
     if existing_df is not None:
         expected_columns = list(existing_df.columns)
@@ -50,11 +60,11 @@ def get_expected_columns(existing_df: pd.DataFrame = None, fallback_df: pd.DataF
     
     # Se il CSV esistente non ha queste colonne, segniamo un upgrade di schema
     missing_extra = [c for c in EXTRA_HC_COLUMNS if c not in expected_columns]
-    if missing_extra:
-        expected_columns.extend(missing_extra)
+    missing_llm = [c for c in LLM_COLUMNS if c not in expected_columns]
+    schema_upgrade_required = False
+    if missing_extra or missing_llm:
+        expected_columns.extend(missing_extra + missing_llm)
         schema_upgrade_required = existing_df is not None
-    else:
-        schema_upgrade_required = False
         
     return expected_columns, schema_upgrade_required
 
@@ -86,13 +96,17 @@ def save_jobs_to_csv(all_jobs_df: pd.DataFrame, existing_path: str) -> None:
         print(f"[CSV] Nuovi job rispetto a {existing_path}: {num_new}")
         
         if schema_upgrade_required:
-            # Riscrive l'intero CSV con il nuovo schema (header aggiornato)
-            print("[CSV] Upgrade schema rilevato: riscrivo {existing_path} con nuovo header")
-            all_jobs_aligned.to_csv(existing_path, quoting=csv.QUOTE_NONNUMERIC, escapechar="\\", index=False)
-            print(f"[CSV] {existing_path} riscritto con {len(all_jobs_aligned)} righe")
+            # In caso di upgrade schema, mantieni righe esistenti allineate e arricchisci solo le nuove
+            print("[CSV] Upgrade schema rilevato: riscrivo file con merge esistente + nuove righe arricchite")
+            existing_aligned = align_columns(existing_df, expected_columns)
+            enriched_new = enrich_dataframe_with_llm(new_rows) if num_new > 0 else new_rows
+            merged = pd.concat([existing_aligned, enriched_new], ignore_index=True)
+            merged.to_csv(existing_path, quoting=csv.QUOTE_NONNUMERIC, escapechar="\\", index=False)
+            print(f"[CSV] {existing_path} riscritto con {len(merged)} righe")
         elif num_new > 0:
             # Append senza header
-            new_rows.to_csv(existing_path, mode='a', header=False, quoting=csv.QUOTE_NONNUMERIC, escapechar="\\", index=False)
+            enriched_new = enrich_dataframe_with_llm(new_rows)
+            enriched_new.to_csv(existing_path, mode='a', header=False, quoting=csv.QUOTE_NONNUMERIC, escapechar="\\", index=False)
             print(f"[CSV] Appesi {num_new} nuovi annunci a {existing_path}")
         else:
             print("[CSV] Nessun nuovo annuncio da aggiungere")
@@ -101,7 +115,9 @@ def save_jobs_to_csv(all_jobs_df: pd.DataFrame, existing_path: str) -> None:
         if not all_jobs_aligned.empty:
             # Assicurati che la directory esista
             Path(existing_path).parent.mkdir(parents=True, exist_ok=True)
-            all_jobs_aligned.to_csv(existing_path, quoting=csv.QUOTE_NONNUMERIC, escapechar="\\", index=False)
+            # Primo file: considera tutte le righe come "nuove" da arricchire
+            enriched = enrich_dataframe_with_llm(all_jobs_aligned)
+            enriched.to_csv(existing_path, quoting=csv.QUOTE_NONNUMERIC, escapechar="\\", index=False)
             print(f"[CSV] Creato {existing_path} con {len(all_jobs_aligned)} righe")
         else:
             print("[CSV] Nessun dato da scrivere")
