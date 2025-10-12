@@ -5,6 +5,7 @@ HiringCafe scraper module
 import time
 import requests
 import pandas as pd
+from scrapers.utils import clean_html_text
 
 
 # === VALORI OSSERVATI (VERIFICATI DAL SITO) ===
@@ -120,8 +121,9 @@ def normalize_hiring_cafe_jobs_to_schema(jobs: list[dict], expected_columns: lis
         workplace_type = job_data.get("workplace_type")  # e.g., Remote/Hybrid/On-site
         is_remote = True if str(workplace_type).lower() == "remote" else False
 
-        # Descrizione (HTML)
-        description = job_info.get("description")
+        # Descrizione (HTML) - pulita dai tag HTML/CSS
+        description_raw = job_info.get("description")
+        description = clean_html_text(description_raw)
 
         # Compenso
         currency = job_data.get("listed_compensation_currency")

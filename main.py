@@ -2,11 +2,44 @@
 Main script per il scraping di job da multiple fonti
 """
 
+import os
 import pandas as pd
 from datetime import datetime
+from pathlib import Path
 from scrapers import scrape_all_locations, fetch_hiring_cafe_dataframe
 from scrapers.utils import align_columns, get_expected_columns, save_jobs_to_csv
- 
+from scrapers.llm import initialize_api_key
+
+
+def load_env_from_root():
+    """Carica variabili d'ambiente dal file .env nella root del progetto"""
+    # Trova la root del progetto (directory che contiene main.py)
+    project_root = Path(__file__).parent
+    env_file = project_root / ".env"
+    
+    if env_file.exists():
+        with open(env_file, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    os.environ[key.strip()] = value.strip()
+    
+    # Carica l'API key e determina il tipo
+    api_key = os.getenv("FREE_GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+    is_free_api_key = bool(os.getenv("FREE_GEMINI_API_KEY"))
+    
+    if not api_key:
+        raise RuntimeError("API key mancante: imposta la variabile d'ambiente FREE_GEMINI_API_KEY o GEMINI_API_KEY")
+    
+    # Stampa il messaggio di caricamento una sola volta
+    if is_free_api_key:
+        print("🔑 Utilizzo FREE_GEMINI_API_KEY (rate limiting attivo: 15 req/min)")
+    else:
+        print("🔑 Utilizzo GEMINI_API_KEY (nessun rate limiting)")
+    
+    # Inizializza le variabili globali nel modulo llm
+    initialize_api_key(api_key, is_free_api_key)
 
 
 # Lista delle città italiane da cercare
@@ -19,10 +52,10 @@ locations = [
         # "Genova, Liguria",        # Porto, shipping tech
         # "Brescia, Lombardia",     # Manufacturing, industria 4.0
         # "Venezia, Veneto",        # Turismo tech, port tech
-        # "Padova, Veneto",         # Healthcare tech, università
+        "Padova, Veneto",         # Healthcare tech, università
         # "Parma, Emilia-Romagna",  # Food tech, automotive
-        # "Roma, Lazio",            #
-        # "Napoli, Campania",        #
+        "Roma, Lazio",            #
+        "Napoli, Campania",        #
 ]
 
 search_term = (
@@ -37,6 +70,9 @@ search_term = (
 def main():
     """Funzione principale che coordina tutti gli scraper"""
     
+    # === Caricamento API key globale ===
+    load_env_from_root()
+    
     # === Data di scraping ===
     scraping_date = datetime.now().strftime("%Y-%m-%d")
     print(f"[DATA] Data di scraping: {scraping_date}")
@@ -47,14 +83,14 @@ def main():
     
     # === JobSpy Scraping ===
     print("=== INIZIO SCRAPING JOBSPY ===")
-    jobspy_df = scrape_all_locations(locations=locations, search_term=search_term, hours_old=168, results_wanted=10)
+    jobspy_df = scrape_all_locations(locations=locations, search_term=search_term, hours_old=168, results_wanted=1)
     
     # === HiringCafe Scraping ===
     print("\n=== INIZIO SCRAPING HIRINGCAFE ===")
     hiring_query = 'developer'
     
     # Fetch da HiringCafe
-    hiring_df = fetch_hiring_cafe_dataframe(expected_columns=expected_columns, search_query=hiring_query, date_filter= "1_week", max_pages=5)
+    hiring_df = fetch_hiring_cafe_dataframe(expected_columns=expected_columns, search_query=hiring_query, date_filter= "3_days", max_pages=5)
     
     # === Combinazione e salvataggio ===
     print(f"\n=== COMBINAZIONE FONTI ===")
@@ -85,7 +121,7 @@ def main():
     print(f"Totale raccolti (jobspy + hiring.cafe): {len(all_sources_unique)} unici")
     
     # Salvataggio finale
-    file_path = "/Users/davidelandolfi/PyProjects/ListScraper/storage/jobs_test_ai2.csv"
+    file_path = "/Users/davidelandolfi/PyProjects/ListScraper/storage/jobs_test1.csv"
     save_jobs_to_csv(all_sources_unique, file_path)
 
 

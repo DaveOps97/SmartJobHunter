@@ -5,6 +5,27 @@ JobSpy scraper module
 import time
 import pandas as pd
 from jobspy import scrape_jobs
+from scrapers.utils import clean_html_text
+
+
+def clean_jobspy_descriptions(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Pulisce le descrizioni HTML dai DataFrame di JobSpy.
+    
+    Args:
+        df: DataFrame con le descrizioni da pulire
+        
+    Returns:
+        DataFrame con descrizioni pulite
+    """
+    if df is None or df.empty or 'description' not in df.columns:
+        return df
+    
+    # Applica la pulizia HTML alle descrizioni
+    df = df.copy()
+    df['description'] = df['description'].apply(clean_html_text)
+    
+    return df
 
 
 def scrape_location_with_retries(location: str, search_term: str, hours_old: int = 168, results_wanted: int = 500, max_retries: int = 3, base_delay: float = 2.0) -> pd.DataFrame | None:
@@ -76,6 +97,8 @@ def scrape_location_with_retries(location: str, search_term: str, hours_old: int
             continue
 
         if isinstance(df, pd.DataFrame) and not df.empty:
+            # Pulisci le descrizioni HTML
+            df = clean_jobspy_descriptions(df)
             print(f"[{location}] Successo: {len(df)} annunci")
             return df
         else:
@@ -117,6 +140,9 @@ def scrape_all_locations(locations: list[str], search_term: str, hours_old: int 
     
     combined_jobs = pd.concat(all_jobs, ignore_index=True)
     combined_jobs_unique = combined_jobs.drop_duplicates(subset=['id'], keep='first')
+    
+    # Pulisci le descrizioni HTML (doppio controllo)
+    # combined_jobs_unique = clean_jobspy_descriptions(combined_jobs_unique)
     
     print(f"[JobSpy] Totale job unici: {len(combined_jobs_unique)}")
     return combined_jobs_unique

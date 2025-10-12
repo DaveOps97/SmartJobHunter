@@ -7,6 +7,37 @@ from scrapers.llm import enrich_dataframe_with_llm
 import csv
 import os
 from pathlib import Path
+import re
+from html import unescape
+
+
+def clean_html_text(text: str) -> str:
+    """
+    Rimuove tutti i tag HTML e CSS dalle descrizioni dei lavori, mantenendo solo il testo pulito.
+    
+    Args:
+        text: Testo contenente HTML/CSS da pulire
+        
+    Returns:
+        Testo pulito senza tag HTML/CSS
+    """
+    if not text or not isinstance(text, str):
+        return text
+    
+    # Decodifica le entità HTML (es. &amp; -> &, &lt; -> <)
+    text = unescape(text)
+    
+    # Rimuovi tutti i tag HTML (inclusi quelli con attributi CSS)
+    # Pattern per catturare tag con attributi: <tag attributi>contenuto</tag>
+    text = re.sub(r'<[^>]+>', ' ', text)
+    
+    # Rimuovi caratteri di controllo e spazi multipli
+    text = re.sub(r'\s+', ' ', text)
+    
+    # Rimuovi spazi all'inizio e alla fine
+    text = text.strip()
+    
+    return text
 
 
 def align_columns(df: pd.DataFrame, columns: list[str]) -> pd.DataFrame:
@@ -49,8 +80,7 @@ def get_expected_columns(existing_df: pd.DataFrame = None, fallback_df: pd.DataF
         'language_requirements', 'role_activities',
         
         # Colonne arricchimento LLM
-        'llm_relevant', 'llm_score', 'llm_motivazione', 
-        'llm_match_competenze', 'llm_segnali_positivi', 'llm_segnali_negativi',
+        'llm_score', 'llm_motivazione', 'llm_match_competenze',
         
         # Data di scraping
         'data_scraping',
