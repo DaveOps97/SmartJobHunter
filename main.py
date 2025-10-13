@@ -120,8 +120,8 @@ def main():
     
     print(f"Totale raccolti (jobspy + hiring.cafe): {len(all_sources_unique)} unici")
     
-    # Salvataggio finale
-    file_path = "/Users/davidelandolfi/PyProjects/ListScraper/storage/jobs_test2.csv"
+    # Salvataggio finale (CSV "canonico" usato come sorgente per il DB)
+    file_path = "/Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.csv"
     save_jobs_to_csv(all_sources_unique, file_path)
 
 
