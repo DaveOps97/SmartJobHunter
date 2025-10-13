@@ -188,6 +188,7 @@ def evaluate_job(row_data: Dict[str, Any], max_retries: int = 3, base_delay: flo
 	title = row_data.get("title")
 	company = row_data.get("company")
 	location = row_data.get("location")
+	job_type = row_data.get("job_type")
 	job_level = row_data.get("job_level")
 	job_function = row_data.get("job_function")
 	skills = row_data.get("skills")
@@ -228,9 +229,12 @@ IDENTIFICAZIONE:
 - Posizione: {location or 'N/A'}
 
 RUOLO E SENIORITY:
+- Tipo di contratto: {job_type or 'N/A'}
 - Livello: {job_level or 'N/A'}
 - Funzione: {job_function or 'N/A'}
 - Competenze richieste: {skills or 'N/A'}
+- Attività ruolo: {role_activities or 'N/A'}
+- Lingue: {language_requirements or 'N/A'}
 
 COMPENSO:
 - Range: {min_amount or 'N/A'} - {max_amount or 'N/A'} {currency or ''} ({interval or 'N/A'})
@@ -245,10 +249,6 @@ AZIENDA:
 - Fatturato: {company_revenue or 'N/A'}
 - Settori: {company_industries or 'N/A'}
 - Attività: {company_activities or 'N/A'}
-
-REQUISITI AGGIUNTIVI:
-- Lingue: {language_requirements or 'N/A'}
-- Attività ruolo: {role_activities or 'N/A'}
 
 DESCRIZIONE COMPLETA:
 {description}

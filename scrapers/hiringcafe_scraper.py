@@ -108,8 +108,10 @@ def normalize_hiring_cafe_jobs_to_schema(jobs: list[dict], expected_columns: lis
             if isinstance(cities, list) and cities:
                 location = ", ".join(cities)
 
-        # # Data pubblicazione
-        # date_posted = job_data.get("estimated_publish_date")
+        # Data pubblicazione
+        date_posted = job_data.get("estimated_publish_date")
+        if date_posted:
+            date_posted = date_posted.split("T")[0]
 
         # Job type e remoto
         commitment_all = job_data.get("commitment")
@@ -166,7 +168,7 @@ def normalize_hiring_cafe_jobs_to_schema(jobs: list[dict], expected_columns: lis
             "title": title,
             "company": company_name,
             "location": location,
-            # "date_posted": date_posted,
+            "date_posted": date_posted,
             "job_type": job_type,
             "interval": interval,
             "min_amount": min_amount,
@@ -175,7 +177,7 @@ def normalize_hiring_cafe_jobs_to_schema(jobs: list[dict], expected_columns: lis
             "is_remote": is_remote,
             "job_level": job_level,
             "job_function": job_function,
-            "emails": None,
+            #"emails": None,
             "description": description,
             "company_url": company_data.get("website") or job_data.get("company_website"),
             "company_logo": company_data.get("image_url"),
@@ -186,7 +188,6 @@ def normalize_hiring_cafe_jobs_to_schema(jobs: list[dict], expected_columns: lis
             "company_description": company_data.get("tagline") or job_data.get("company_tagline"),
             "skills": skills,
             "work_from_home_type": workplace_type,
-            # Nuovi campi serializzati con TUTTI i valori
             "language_requirements": language_requirements_all,
             "role_activities": role_activities_all,
         }

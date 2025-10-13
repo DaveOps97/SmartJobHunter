@@ -83,7 +83,7 @@ def get_expected_columns(existing_df: pd.DataFrame = None, fallback_df: pd.DataF
         'llm_score', 'llm_motivazione', 'llm_match_competenze',
         
         # Data di scraping
-        'data_scraping',
+        'scraping_date',
     ]
     
     if existing_df is not None:

@@ -79,7 +79,7 @@ def main():
     
     # === Schema fisso definito a priori ===
     expected_columns, _ = get_expected_columns()
-    print(f"[SCHEMA] Schema fisso definito con {len(expected_columns)} colonne")
+   # print(f"[SCHEMA] Schema fisso definito con {len(expected_columns)} colonne")
     
     # === JobSpy Scraping ===
     print("=== INIZIO SCRAPING JOBSPY ===")
@@ -116,12 +116,12 @@ def main():
     
     # Aggiungi la data di scraping a tutte le righe
     if not all_sources_unique.empty:
-        all_sources_unique['data_scraping'] = scraping_date
+        all_sources_unique['scraping_date'] = scraping_date
     
     print(f"Totale raccolti (jobspy + hiring.cafe): {len(all_sources_unique)} unici")
     
     # Salvataggio finale
-    file_path = "/Users/davidelandolfi/PyProjects/ListScraper/storage/jobs_test1.csv"
+    file_path = "/Users/davidelandolfi/PyProjects/ListScraper/storage/jobs_test2.csv"
     save_jobs_to_csv(all_sources_unique, file_path)
 
 
