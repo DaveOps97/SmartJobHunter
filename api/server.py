@@ -171,6 +171,10 @@ def index() -> str:
 <td><input type="text" value="${esc(r.notes)}" data-id="${r.id}" class="note" style="width:140px"/></td>
 `;
           rowsEl.appendChild(tr);
+          tr.querySelector('td[title]').style.cursor = 'pointer';
+          tr.querySelector('td[title]').onclick = function() {
+            showMotivazione(this.getAttribute('title'));
+          };
         });
         pageInfoEl.textContent = `Page ${data.page} / ${data.total_pages} — ${data.total_rows} rows`;
         metaEl.textContent = `order_by=${orderByEl.value} ${orderDirEl.value} | mode=${onlyViewedEl.checked ? 'viewed' : 'unviewed'}`;
@@ -198,14 +202,63 @@ def index() -> str:
     document.getElementById('next').onclick = () => {page++;load();};
     onlyViewedEl.onchange = () => { page = 1; load(); };
     document.getElementById('copyViewedUrls').onclick = async ()=>{
-      const params = new URLSearchParams({page:'1',page_size:'500',order_by:orderByEl.value,order_dir:orderDirEl.value,only_viewed:'true',only_unviewed:'false'});
-      const res = await fetch('/jobs?' + params.toString());
-      if (!res.ok) { alert('Error fetching viewed jobs'); return; }
-      const data = await res.json();
-      if (!data.rows || data.rows.length === 0) { alert('No viewed jobs found'); return; }
-      const urls = data.rows.filter(r=>r.job_url).map(r=>r.job_url);
-      if (urls.length > 0) { await navigator.clipboard.writeText(urls.join('\\n')); alert(`Copied ${urls.length} URLs to clipboard`); } else { alert('No viewed jobs with URLs found'); }
+      // Raccoglie gli URL dalle righe attualmente visualizzate nella tabella che hanno viewed=true
+      const viewedRows = document.querySelectorAll('.chk-viewed:checked');
+      const urls = [];
+      viewedRows.forEach(chk => {
+        const id = chk.getAttribute('data-id');
+        const row = chk.closest('tr');
+        const linkEl = row.querySelector('a[href]');
+        if (linkEl) {
+          urls.push(linkEl.href);
+        }
+      });
+      if (urls.length > 0) { 
+        await navigator.clipboard.writeText(urls.join('\\n')); 
+        alert(`Copied ${urls.length} URLs to clipboard`); 
+      } else { 
+        alert('No viewed jobs with URLs in current view'); 
+      }
     };
     load();
+    // Modal per visualizzare motivazione completa
+    function showMotivazione(text) {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:1000;';
+      
+      const modal = document.createElement('div');
+      modal.style.cssText = 'background:#d0d0d0;padding:24px;border-radius:12px;max-width:800px;max-height:80vh;overflow-y:auto;color:#000;';
+      
+      // Parse il testo nelle sezioni
+      const sections = text.split(/(\*\*Punti Positivi \(\+\):\*\*|\*\*Punti Negativi \(-\):\*\*|\*\*Analisi Punteggi:\*\*)/);
+      
+      let currentBg = '';
+      sections.forEach(section => {
+        if (section.includes('Punti Positivi')) {
+          currentBg = '#c8e6c9'; // verde pastello
+        } else if (section.includes('Punti Negativi')) {
+          currentBg = '#ffcdd2'; // rosso pastello
+        } else if (section.includes('Analisi Punteggi')) {
+          currentBg = '#bbdefb'; // blu pastello
+        }
+        
+        if (section.trim() && !section.startsWith('**')) {
+          const div = document.createElement('div');
+          div.style.cssText = `background:${currentBg};padding:12px;margin:8px 0;border-radius:8px;white-space:pre-wrap;`;
+          div.textContent = section.trim();
+          modal.appendChild(div);
+        } else if (section.startsWith('**')) {
+          const title = document.createElement('h3');
+          title.style.cssText = 'margin:16px 0 8px 0;';
+          title.textContent = section.replace(/\*\*/g, '');
+          modal.appendChild(title);
+        }
+      });
+      
+      overlay.onclick = () => overlay.remove();
+      overlay.appendChild(modal);
+      modal.onclick = (e) => e.stopPropagation();
+      document.body.appendChild(overlay);
+    }
   </script>
 </body></html>'''
