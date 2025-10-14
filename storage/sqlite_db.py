@@ -213,8 +213,13 @@ def query_jobs(
     order_by: str = "llm_score",
     order_dir: str = "DESC",
     only_unviewed: bool = False,
+    only_viewed: bool = False,
 ) -> Tuple[List[Dict[str, Any]], int, int]:
     """Ritorna righe paginate e ordinate.
+
+    Args:
+        only_unviewed: se True, mostra solo job con viewed=0 o NULL
+        only_viewed: se True, mostra solo job con viewed=1
 
     Returns:
         (rows, total_rows, total_pages)
@@ -229,7 +234,13 @@ def query_jobs(
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
-        where_clause = "WHERE viewed IS NULL OR viewed = 0" if only_unviewed else ""
+        # Costruisci WHERE clause
+        where_clause = ""
+        if only_unviewed and not only_viewed:
+            where_clause = "WHERE (viewed IS NULL OR viewed = 0)"
+        elif only_viewed and not only_unviewed:
+            where_clause = "WHERE viewed = 1"
+        # Se entrambi False o entrambi True, nessun filtro
 
         # Conteggio totale
         cur.execute(f"SELECT COUNT(1) FROM jobs {where_clause}")
@@ -291,5 +302,3 @@ def set_job_flags(
     with get_connection(db_path) as conn:
         cur = conn.cursor()
         cur.execute(sql, params)
-
-

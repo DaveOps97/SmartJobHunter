@@ -47,6 +47,7 @@ def list_jobs(
     order_by: str = Query("llm_score"),
     order_dir: str = Query("DESC"),
     only_unviewed: bool = Query(False),
+    only_viewed: bool = Query(False),
 ):
     try:
         rows, total_rows, total_pages = query_jobs(
@@ -56,6 +57,7 @@ def list_jobs(
             order_by=order_by,
             order_dir=order_dir,
             only_unviewed=only_unviewed,
+            only_viewed=only_viewed,
         )
         return {"rows": rows, "total_rows": total_rows, "total_pages": total_pages, "page": page}
     except Exception as e:
@@ -92,20 +94,35 @@ def index() -> str:
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ListScraper</title>
     <style>
-      body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 24px; }
+      body { 
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; 
+        margin: 24px; 
+        background-color: #2b2b2b;
+        color: #e0e0e0;
+      }
       header { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom: 16px; }
-      input, select, button { padding:8px; }
-      table { width:100%; border-collapse: collapse; }
-      th, td { text-align:left; padding:8px; border-bottom:1px solid #eee; }
-      th { cursor:pointer; }
-      .meta { color:#666; font-size:12px; }
+      input, select, button { 
+        padding:8px; 
+        background-color: #3a3a3a;
+        color: #e0e0e0;
+        border: 1px solid #555;
+        border-radius: 4px;
+      }
+      button:hover { background-color: #4a4a4a; cursor: pointer; }
+      table { width:100%; border-collapse: collapse; background-color: #333; }
+      th, td { text-align:left; padding:8px; border-bottom:1px solid #444; }
+      th { cursor:pointer; background-color: #3a3a3a; }
+      tr:hover { background-color: #3a3a3a; }
+      a { color: #5ca9ff; }
+      a:visited { color: #9d7cff; }
+      .meta { color:#999; font-size:12px; }
+      input[type="text"] { background-color: #3a3a3a; color: #e0e0e0; }
     </style>
   </head>
 <body>
   <header>
     <label>Order by <select id="orderBy"><option value="llm_score">llm_score</option><option value="scraping_date">scraping_date</option><option value="date_posted">date_posted</option><option value="company">company</option><option value="title">title</option></select></label>
     <label>Dir <select id="orderDir"><option value="DESC">DESC</option><option value="ASC">ASC</option></select></label>
-    <label><input type="checkbox" id="onlyUnviewed"/> Only unviewed</label>
     <label><input type="checkbox" id="onlyViewed"/> Only viewed</label>
     <button id="reload">Reload</button>
     <button id="copyViewedUrls">Copy URLs of viewed</button>
@@ -120,7 +137,6 @@ def index() -> str:
     const pageSize = 50;
     const orderByEl = document.getElementById('orderBy');
     const orderDirEl = document.getElementById('orderDir');
-    const onlyUnviewedEl = document.getElementById('onlyUnviewed');
     const onlyViewedEl = document.getElementById('onlyViewed');
     const rowsEl = document.getElementById('rows');
     const metaEl = document.getElementById('meta');
@@ -134,8 +150,12 @@ def index() -> str:
     }
     async function load() {
       const params = new URLSearchParams({
-        page: String(page),page_size: String(pageSize),order_by: orderByEl.value,order_dir: orderDirEl.value,
-        only_unviewed: onlyUnviewedEl.checked?'true':'false',only_viewed: onlyViewedEl.checked?'true':'false'
+        page: String(page),
+        page_size: String(pageSize),
+        order_by: orderByEl.value,
+        order_dir: orderDirEl.value,
+        only_unviewed: onlyViewedEl.checked ? 'false' : 'true',
+        only_viewed: onlyViewedEl.checked ? 'true' : 'false'
       });
       try {
         const res = await fetch('/jobs?' + params.toString());
@@ -153,7 +173,7 @@ def index() -> str:
           rowsEl.appendChild(tr);
         });
         pageInfoEl.textContent = `Page ${data.page} / ${data.total_pages} — ${data.total_rows} rows`;
-        metaEl.textContent = `order_by=${orderByEl.value} ${orderDirEl.value} | only_unviewed=${onlyUnviewedEl.checked} | only_viewed=${onlyViewedEl.checked}`;
+        metaEl.textContent = `order_by=${orderByEl.value} ${orderDirEl.value} | mode=${onlyViewedEl.checked ? 'viewed' : 'unviewed'}`;
         document.querySelectorAll('.chk-viewed').forEach(chk => chk.onchange = async e => {
           const id = chk.getAttribute('data-id');
           await fetch(`/jobs/${id}/flags`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({viewed:chk.checked})});
@@ -176,13 +196,14 @@ def index() -> str:
     document.getElementById('reload').onclick = () => { page = 1; load(); };
     document.getElementById('prev').onclick = () => { if(page>1){page--;load();}};
     document.getElementById('next').onclick = () => {page++;load();};
-    onlyUnviewedEl.onchange = () => { if (onlyUnviewedEl.checked) onlyViewedEl.checked = false; };
-    onlyViewedEl.onchange = () => { if (onlyViewedEl.checked) onlyUnviewedEl.checked = false; };
+    onlyViewedEl.onchange = () => { page = 1; load(); };
     document.getElementById('copyViewedUrls').onclick = async ()=>{
-      const params = new URLSearchParams({page:'1',page_size:'10000',order_by:orderByEl.value,order_dir:orderDirEl.value,only_viewed:'true'});
+      const params = new URLSearchParams({page:'1',page_size:'500',order_by:orderByEl.value,order_dir:orderDirEl.value,only_viewed:'true',only_unviewed:'false'});
       const res = await fetch('/jobs?' + params.toString());
+      if (!res.ok) { alert('Error fetching viewed jobs'); return; }
       const data = await res.json();
-      const urls = (data.rows||[]).filter(r=>r.job_url).map(r=>r.job_url);
+      if (!data.rows || data.rows.length === 0) { alert('No viewed jobs found'); return; }
+      const urls = data.rows.filter(r=>r.job_url).map(r=>r.job_url);
       if (urls.length > 0) { await navigator.clipboard.writeText(urls.join('\\n')); alert(`Copied ${urls.length} URLs to clipboard`); } else { alert('No viewed jobs with URLs found'); }
     };
     load();
