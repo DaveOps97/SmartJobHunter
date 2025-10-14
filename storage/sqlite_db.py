@@ -109,7 +109,7 @@ def initialize_db(db_path: str, csv_columns: List[str]) -> None:
         # Indici utili
         if has_id:
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_id ON jobs(id)")
-        for idx_col in ["llm_score", "date_posted", "company", "title", "scraping_date"]:
+        for idx_col in ["llm_score", "date_posted", "company", "location", "title", "scraping_date"]:
             if idx_col in csv_columns or idx_col in KNOWN_INTEGER_COLUMNS:
                 cur.execute(
                     f"CREATE INDEX IF NOT EXISTS idx_jobs_{idx_col} ON jobs({idx_col})"

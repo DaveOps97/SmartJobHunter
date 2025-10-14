@@ -121,7 +121,14 @@ def index() -> str:
   </head>
 <body>
   <header>
-    <label>Order by <select id="orderBy"><option value="llm_score">llm_score</option><option value="scraping_date">scraping_date</option><option value="date_posted">date_posted</option><option value="company">company</option><option value="title">title</option></select></label>
+    <select id="orderBy">
+      <option value="llm_score">llm_score</option>
+      <option value="scraping_date">scraping_date</option>
+      <option value="date_posted">date_posted</option>
+      <option value="company">company</option>
+      <option value="location">location</option>
+      <option value="title">title</option>
+    </select>
     <label>Dir <select id="orderDir"><option value="DESC">DESC</option><option value="ASC">ASC</option></select></label>
     <label><input type="checkbox" id="onlyViewed"/> Only viewed</label>
     <button id="reload">Reload</button>
@@ -129,7 +136,7 @@ def index() -> str:
   </header>
   <div class="meta" id="meta"></div>
   <table><thead><tr>
-    <th>score</th><th>title</th><th>company</th><th>date</th><th>scraping_date</th><th>url</th><th>motivazione</th><th>viewed</th><th>applied</th><th>note</th>
+    <th>score</th><th>title</th><th>company</th><th>location</th><th>date</th><th>scraping_date</th><th>url</th><th>motivazione</th><th>viewed</th><th>applied</th><th>note</th>
   </tr></thead><tbody id="rows"></tbody></table>
   <div style="margin-top:12px; display:flex; gap:8px; align-items:center;"><button id="prev">Prev</button><span id="pageInfo" class="meta"></span><button id="next">Next</button></div>
   <script>
@@ -165,11 +172,19 @@ def index() -> str:
         data.rows.forEach(r => {
           const tr = document.createElement('tr');
           tr.innerHTML = `
-<td>${esc(r.llm_score)}</td><td>${tronc(r.title,50)}</td><td>${tronc(r.company,40)}</td><td>${esc(r.date_posted)}</td><td>${esc(r.scraping_date)}</td><td>${r.job_url?`<a href="${esc(r.job_url)}" target="_blank">link</a>`:''}</td><td title="${esc(r.llm_motivazione)}">${tronc(r.llm_motivazione,80)}</td>
+<td>${esc(r.llm_score)}</td>
+<td>${tronc(r.title,50)}</td>
+<td>${tronc(r.company,40)}</td>
+<td>${tronc(r.location,40)}</td>
+<td>${esc(r.date_posted)}</td>
+<td>${esc(r.scraping_date)}</td>
+<td>${r.job_url?`<a href="${esc(r.job_url)}" target="_blank">link</a>`:''}</td>
+<td title="${esc(r.llm_motivazione)}">${tronc(r.llm_motivazione,80)}</td>
 <td><input type="checkbox" class="chk-viewed" data-id="${r.id}" ${r.viewed?'checked':''}/></td>
 <td><input type="checkbox" class="chk-applied" data-id="${r.id}" ${r.applied?'checked':''}/></td>
 <td><input type="text" value="${esc(r.notes)}" data-id="${r.id}" class="note" style="width:140px"/></td>
 `;
+
           rowsEl.appendChild(tr);
           tr.querySelector('td[title]').style.cursor = 'pointer';
           tr.querySelector('td[title]').onclick = function() {
@@ -224,32 +239,60 @@ def index() -> str:
     // Modal per visualizzare motivazione completa
     function showMotivazione(text) {
       const overlay = document.createElement('div');
-      overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:1000;';
+      overlay.style.cssText = `
+        position:fixed;
+        top:0;left:0;width:100%;height:100%;
+        background:rgba(0,0,0,0.7);
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        z-index:1000;
+      `;
       
       const modal = document.createElement('div');
-      modal.style.cssText = 'background:#d0d0d0;padding:24px;border-radius:12px;max-width:800px;max-height:80vh;overflow-y:auto;color:#000;';
+      modal.style.cssText = `
+        background:#2a2a2a;
+        color:#f0f0f0;
+        padding:24px;
+        border-radius:12px;
+        max-width:1000px;
+        max-height:80vh;
+        overflow-y:auto;
+        box-shadow:0 0 20px rgba(0,0,0,0.6);
+      `;
       
-      // Parse il testo nelle sezioni
+      // Sezioni colorate con tema scuro
       const sections = text.split(/(\*\*Punti Positivi \(\+\):\*\*|\*\*Punti Negativi \(-\):\*\*|\*\*Analisi Punteggi:\*\*)/);
       
       let currentBg = '';
       sections.forEach(section => {
         if (section.includes('Punti Positivi')) {
-          currentBg = '#c8e6c9'; // verde pastello
+          currentBg = '#245c3a'; // verde leggermente più chiaro
         } else if (section.includes('Punti Negativi')) {
-          currentBg = '#ffcdd2'; // rosso pastello
+          currentBg = '#5c2a2a'; // rosso leggermente più chiaro
         } else if (section.includes('Analisi Punteggi')) {
-          currentBg = '#bbdefb'; // blu pastello
+          currentBg = '#24465c'; // blu leggermente più chiaro
         }
-        
+
         if (section.trim() && !section.startsWith('**')) {
           const div = document.createElement('div');
-          div.style.cssText = `background:${currentBg};padding:12px;margin:8px 0;border-radius:8px;white-space:pre-wrap;`;
+          div.style.cssText = `
+            background:${currentBg};
+            padding:12px;
+            margin:8px 0;
+            border-radius:8px;
+            white-space:pre-wrap;
+          `;
           div.textContent = section.trim();
           modal.appendChild(div);
         } else if (section.startsWith('**')) {
           const title = document.createElement('h3');
-          title.style.cssText = 'margin:16px 0 8px 0;';
+          title.style.cssText = `
+            margin:16px 0 8px 0;
+            color:#fff;
+            border-bottom:1px solid #444;
+            padding-bottom:4px;
+          `;
           title.textContent = section.replace(/\*\*/g, '');
           modal.appendChild(title);
         }
@@ -260,5 +303,6 @@ def index() -> str:
       modal.onclick = (e) => e.stopPropagation();
       document.body.appendChild(overlay);
     }
+
   </script>
 </body></html>'''
