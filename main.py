@@ -45,25 +45,27 @@ def load_env_from_root():
 # Lista delle città italiane da cercare
 locations = [
         "Milano, Lombardia",      # Hub tech principale (70% job tech Italia)
-        # "Torino, Piemonte",       # Automotive, fintech, AI
-        # "Bologna, Emilia-Romagna", # Tech hub emergente, pharma-tech
-        # "Firenze, Toscana",       # Scale-up, turismo tech
-        # "Verona, Veneto",         # Logistica, manufacturing tech
-        # "Genova, Liguria",        # Porto, shipping tech
-        # "Brescia, Lombardia",     # Manufacturing, industria 4.0
-        # "Venezia, Veneto",        # Turismo tech, port tech
+        "Torino, Piemonte",       # Automotive, fintech, AI
+        "Bologna, Emilia-Romagna", # Tech hub emergente, pharma-tech
+        "Firenze, Toscana",       # Scale-up, turismo tech
+        "Verona, Veneto",         # Logistica, manufacturing tech
+        "Genova, Liguria",        # Porto, shipping tech
+        "Brescia, Lombardia",     # Manufacturing, industria 4.0
+        "Venezia, Veneto",        # Turismo tech, port tech
         "Padova, Veneto",         # Healthcare tech, università
-        # "Parma, Emilia-Romagna",  # Food tech, automotive
+        "Parma, Emilia-Romagna",  # Food tech, automotive
+        "Perugia, Umbria",
         "Roma, Lazio",            #
         "Napoli, Campania",        #
+        "Caserta, Campania",        #
 ]
 
-search_term = (
-    '(data OR python OR java OR backend OR software OR machine OR learning OR AI OR ML OR ETL) '
-    '(engineer OR developer) '
+jobspy_search_term = (
+    '(data OR python OR java OR backend OR software OR machine OR learning OR AI OR ML OR ETL OR big data) '
+    '(engineer OR developer OR scientist) '
     '(python OR java OR spark OR pyspark OR docker OR kubernetes OR '
     'scrapy OR mongodb OR postgresql OR rest OR api OR fastapi OR '
-    'langchain OR haystack OR llm OR git OR spring OR kafka OR microservices) '
+    'langchain OR haystack OR llm OR git OR spring OR kafka OR microservices OR arangodb OR pinecone) '
     '-senior -lead -manager -architect -principal'
 )
 
@@ -83,14 +85,14 @@ def main():
     
     # === JobSpy Scraping ===
     print("=== INIZIO SCRAPING JOBSPY ===")
-    jobspy_df = scrape_all_locations(locations=locations, search_term=search_term, hours_old=168, results_wanted=1)
+    jobspy_df = scrape_all_locations(locations=locations, search_term=jobspy_search_term, hours_old=720, results_wanted=300)
     
     # === HiringCafe Scraping ===
     print("\n=== INIZIO SCRAPING HIRINGCAFE ===")
-    hiring_query = 'developer'
+    hiring_query = ''
     
     # Fetch da HiringCafe
-    hiring_df = fetch_hiring_cafe_dataframe(expected_columns=expected_columns, search_query=hiring_query, date_filter= "3_days", max_pages=5)
+    hiring_df = fetch_hiring_cafe_dataframe(expected_columns=expected_columns, search_query=hiring_query, date_filter= "1_month", max_pages=8)
     
     # === Combinazione e salvataggio ===
     print(f"\n=== COMBINAZIONE FONTI ===")

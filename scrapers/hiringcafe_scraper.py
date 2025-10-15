@@ -23,7 +23,7 @@ DATE_FILTERS = {
 }
 
 
-def search_hiring_cafe(search_query: str = "java developer", date_filter="1_week", page: int = 0, max_retries: int = 3):
+def search_hiring_cafe(search_query: str = "", date_filter="1_week", page: int = 0, max_retries: int = 3):
     """Versione ridotta della ricerca HiringCafe API con retry automatico"""
 
     url = "https://hiring.cafe/api/search-jobs"
@@ -40,18 +40,19 @@ def search_hiring_cafe(search_query: str = "java developer", date_filter="1_week
         "page": page,
         "searchState": {
             "searchQuery": search_query,
-            "jobTitleQuery": "(\"developer\" OR \"engineer\")",
+            "jobTitleQuery": "(\"developer\" OR \"engineer\" OR \"scientist\")",
             "commitmentTypes": ["Full Time"],
-            "seniorityLevel": ["Entry Level"],
-            "departments": ["Engineering", "Software Development"],
+            "seniorityLevel": ["Entry Level", "No Prior Experience Required"],
+            "departments": [], # "Engineering", "Software Development"
             "bachelorsDegreeRequirements": ["Required"],
             "mastersDegreeRequirements": ["Required", "Preferred", "Not Mentioned"],
-            "languageRequirements": ["english"],
+            "languageRequirements": ["english","italian"],
+            "languageRequirementsOperator": "OR",
             "dateFetchedPastNDays": DATE_FILTERS[date_filter],
             "locations": [{
                 "formatted_address": "Italy",
                 "types": ["country"],
-                "geometry": {"location": {"lat": "45.6634", "lon": "9.1521"}},
+                # "geometry": {"location": {"lat": "45.6634", "lon": "9.1521"}}, # non sembra esserci nel body originale
                 "address_components": [{"long_name": "Italy", "short_name": "IT", "types": ["country"]}],
                 "options": {"flexible_regions": ["anywhere_in_continent", "anywhere_in_world"]},
             }],
