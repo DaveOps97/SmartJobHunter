@@ -1,6 +1,6 @@
 """
 Modulo SQLite: schema, import incrementale da CSV (chunked), query paginate/ordinate,
-e aggiornamento flag utente (viewed/applied/notes).
+e aggiornamento flag utente (viewed/interested/applied/notes).
 
 Nota: pensato per CSV molto grandi (10k-20k+ righe, 38+ colonne) con memoria
 stabile grazie a pandas.read_csv(..., chunksize=N).
@@ -39,8 +39,10 @@ KNOWN_BOOLEAN_COLUMNS = {
 
 USER_FLAG_COLUMNS = [
     "viewed",
+    "interested",
     "applied",
     "viewed_at",
+    "interested_at",
     "applied_at",
     "notes",
 ]
@@ -89,11 +91,13 @@ def initialize_db(db_path: str, csv_columns: List[str]) -> None:
             sql_type = _map_sql_type(col)
             column_defs.append(f"`{col}` {sql_type}")
 
-        # Flag utente
+        # Flag utente (inclusi timestamp)
         column_defs.extend([
             "`viewed` INTEGER",
+            "`interested` INTEGER",
             "`applied` INTEGER",
             "`viewed_at` TEXT",
+            "`interested_at` TEXT",
             "`applied_at` TEXT",
             "`notes` TEXT",
         ])
@@ -105,6 +109,23 @@ def initialize_db(db_path: str, csv_columns: List[str]) -> None:
             + ")"
         )
         cur.execute(create_sql)
+
+        # Aggiungi colonne mancanti se il DB esiste già
+        cur.execute("PRAGMA table_info(jobs)")
+        existing_columns = {row[1] for row in cur.fetchall()}
+        
+        # Lista di tutte le colonne da verificare e aggiungere
+        required_columns = [
+            ("interested", "INTEGER"),
+            ("interested_at", "TEXT"),
+            ("viewed_at", "TEXT"),
+            ("applied_at", "TEXT"),
+        ]
+        
+        for col_name, col_type in required_columns:
+            if col_name not in existing_columns:
+                print(f"Aggiungendo colonna mancante: {col_name}")
+                cur.execute(f"ALTER TABLE jobs ADD COLUMN `{col_name}` {col_type}")
 
         # Indici utili
         if has_id:
@@ -141,7 +162,7 @@ def _to_python_value(col: str, value: Any) -> Any:
 def upsert_jobs_from_csv(csv_path: str, db_path: str, chunksize: int = 2000) -> Tuple[int, int]:
     """Import incrementale del CSV in SQLite con UPSERT su `id`.
 
-    Preserva i flag utente esistenti (viewed/applied/notes) durante gli update.
+    Preserva i flag utente esistenti (viewed/interested/applied/notes) durante gli update.
 
     Returns:
         (num_inserted, num_updated)
@@ -212,14 +233,16 @@ def query_jobs(
     page_size: int = 50,
     order_by: str = "llm_score",
     order_dir: str = "DESC",
-    only_unviewed: bool = False,
-    only_viewed: bool = False,
+    mode: str = "not_viewed",
 ) -> Tuple[List[Dict[str, Any]], int, int]:
     """Ritorna righe paginate e ordinate.
 
     Args:
-        only_unviewed: se True, mostra solo job con viewed=0 o NULL
-        only_viewed: se True, mostra solo job con viewed=1
+        mode: filtra per stato
+            - "not_viewed": viewed=0/NULL AND interested=0/NULL AND applied=0/NULL
+            - "viewed": viewed=1 AND interested=0/NULL AND applied=0/NULL
+            - "interested": interested=1 AND applied=0/NULL
+            - "applied": applied=1
 
     Returns:
         (rows, total_rows, total_pages)
@@ -234,13 +257,16 @@ def query_jobs(
         conn.row_factory = sqlite3.Row
         cur = conn.cursor()
 
-        # Costruisci WHERE clause
+        # Costruisci WHERE clause basata su mode
         where_clause = ""
-        if only_unviewed and not only_viewed:
-            where_clause = "WHERE (viewed IS NULL OR viewed = 0)"
-        elif only_viewed and not only_unviewed:
-            where_clause = "WHERE viewed = 1"
-        # Se entrambi False o entrambi True, nessun filtro
+        if mode == "not_viewed":
+            where_clause = "WHERE (viewed IS NULL OR viewed = 0) AND (interested IS NULL OR interested = 0) AND (applied IS NULL OR applied = 0)"
+        elif mode == "viewed":
+            where_clause = "WHERE viewed = 1 AND (interested IS NULL OR interested = 0) AND (applied IS NULL OR applied = 0)"
+        elif mode == "interested":
+            where_clause = "WHERE interested = 1 AND (applied IS NULL OR applied = 0)"
+        elif mode == "applied":
+            where_clause = "WHERE applied = 1"
 
         # Conteggio totale
         cur.execute(f"SELECT COUNT(1) FROM jobs {where_clause}")
@@ -265,6 +291,7 @@ def set_job_flags(
     db_path: str,
     job_id: str,
     viewed: Optional[bool] = None,
+    interested: Optional[bool] = None,
     applied: Optional[bool] = None,
     note: Optional[str] = None,
 ) -> None:
@@ -283,6 +310,12 @@ def set_job_flags(
         updates.append("viewed_at=?")
         params.append(now_iso if viewed else None)
 
+    if interested is not None:
+        updates.append("interested=?")
+        params.append(1 if interested else 0)
+        updates.append("interested_at=?")
+        params.append(now_iso if interested else None)
+
     if applied is not None:
         updates.append("applied=?")
         params.append(1 if applied else 0)
@@ -294,6 +327,7 @@ def set_job_flags(
         params.append(note)
 
     if not updates:
+        # Non sollevare errore, semplicemente ritorna
         return
 
     params.append(job_id)
@@ -301,4 +335,6 @@ def set_job_flags(
 
     with get_connection(db_path) as conn:
         cur = conn.cursor()
-        cur.execute(sql, params)
+        result = cur.execute(sql, params)
+        if result.rowcount == 0:
+            raise ValueError(f"Job con id '{job_id}' non trovato")

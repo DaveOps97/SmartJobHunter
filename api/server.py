@@ -3,8 +3,8 @@ FastAPI per consultazione e flagging delle offerte.
 
 Endpoint principali:
 - GET  /health
-- GET  /jobs               (paginazione/ordinamento, filtro solo non visionati)
-- POST /jobs/{job_id}/flags  (aggiorna viewed/applied/notes)
+- GET  /jobs               (paginazione/ordinamento, filtro per mode)
+- POST /jobs/{job_id}/flags  (aggiorna viewed/interested/applied/notes)
 
 Configurazione DB:
 - Env var LISTSCRAPER_DB (default: /Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.db)
@@ -46,9 +46,18 @@ def list_jobs(
     page_size: int = Query(50, ge=1, le=500),
     order_by: str = Query("llm_score"),
     order_dir: str = Query("DESC"),
-    only_unviewed: bool = Query(False),
-    only_viewed: bool = Query(False),
+    mode: str = Query("not_viewed"),
 ):
+    """
+    Elenca i job con paginazione e filtri.
+    
+    Args:
+        mode: filtra per stato:
+            - "not_viewed": nessuna flag attiva
+            - "viewed": solo viewed=true
+            - "interested": interested=true
+            - "applied": applied=true
+    """
     try:
         rows, total_rows, total_pages = query_jobs(
             db_path=get_db_path(),
@@ -56,8 +65,7 @@ def list_jobs(
             page_size=page_size,
             order_by=order_by,
             order_dir=order_dir,
-            only_unviewed=only_unviewed,
-            only_viewed=only_viewed,
+            mode=mode,
         )
         return {"rows": rows, "total_rows": total_rows, "total_pages": total_pages, "page": page}
     except Exception as e:
@@ -66,23 +74,29 @@ def list_jobs(
 
 class FlagsIn(BaseModel):
     viewed: Optional[bool] = Field(default=None)
+    interested: Optional[bool] = Field(default=None)
     applied: Optional[bool] = Field(default=None)
     note: Optional[str] = Field(default=None)
 
 
 @app.post("/jobs/{job_id}/flags")
 def update_flags(job_id: str, body: FlagsIn):
+    """Aggiorna le flag utente per un job specifico."""
     try:
         set_job_flags(
             db_path=get_db_path(),
             job_id=job_id,
             viewed=body.viewed,
+            interested=body.interested,
             applied=body.applied,
             note=body.note,
         )
-        return {"status": "ok"}
+        return {"status": "ok", "job_id": job_id}  # Conferma con job_id
     except Exception as e:
+        import traceback
+        traceback.print_exc()  # Log completo dell'errore
         raise HTTPException(status_code=400, detail=str(e))
+
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -100,7 +114,7 @@ def index() -> str:
         background-color: #2b2b2b;
         color: #e0e0e0;
       }
-      header { display:flex; gap:12px; align-items:center; flex-wrap:wrap; margin-bottom: 16px; }
+      header { display:flex; gap:30px; align-items:center; flex-wrap:wrap; margin-bottom: 16px; }
       input, select, button { 
         padding:8px; 
         background-color: #3a3a3a;
@@ -130,13 +144,18 @@ def index() -> str:
       <option value="title">title</option>
     </select>
     <label>Dir <select id="orderDir"><option value="DESC">DESC</option><option value="ASC">ASC</option></select></label>
-    <label><input type="checkbox" id="onlyViewed"/> Only viewed</label>
+    <label>Table view <select id="mainFlagFilter">
+      <option value="not_viewed">Not viewed</option>
+      <option value="viewed">Viewed</option>
+      <option value="interested">Interested</option>
+      <option value="applied">Applied</option>
+    </select></label>
     <button id="reload">Reload</button>
-    <button id="copyViewedUrls">Copy URLs of viewed</button>
+    <button id="copyInterestedUrls">Copy URLs of interested</button>
   </header>
   <div class="meta" id="meta"></div>
   <table><thead><tr>
-    <th>score</th><th>title</th><th>company</th><th>location</th><th>date</th><th>scraping_date</th><th>url</th><th>motivazione</th><th>viewed</th><th>applied</th><th>note</th>
+    <th>score</th><th>title</th><th>company</th><th>location</th><th>date</th><th>scraping_date</th><th>url</th><th>motivazione</th><th>flag</th><th>note</th>
   </tr></thead><tbody id="rows"></tbody></table>
   <div style="margin-top:12px; display:flex; gap:8px; align-items:center;"><button id="prev">Prev</button><span id="pageInfo" class="meta"></span><button id="next">Next</button></div>
   <script>
@@ -144,7 +163,7 @@ def index() -> str:
     const pageSize = 50;
     const orderByEl = document.getElementById('orderBy');
     const orderDirEl = document.getElementById('orderDir');
-    const onlyViewedEl = document.getElementById('onlyViewed');
+    const mainFlagFilterEl = document.getElementById('mainFlagFilter');
     const rowsEl = document.getElementById('rows');
     const metaEl = document.getElementById('meta');
     const pageInfoEl = document.getElementById('pageInfo');
@@ -161,8 +180,7 @@ def index() -> str:
         page_size: String(pageSize),
         order_by: orderByEl.value,
         order_dir: orderDirEl.value,
-        only_unviewed: onlyViewedEl.checked ? 'false' : 'true',
-        only_viewed: onlyViewedEl.checked ? 'true' : 'false'
+        mode: document.getElementById('mainFlagFilter').value,
       });
       try {
         const res = await fetch('/jobs?' + params.toString());
@@ -170,6 +188,7 @@ def index() -> str:
         const data = await res.json();
         rowsEl.innerHTML = '';
         data.rows.forEach(r => {
+          const flagVal = r.applied ? 'applied' : r.interested ? 'interested' : r.viewed ? 'viewed' : 'not_viewed';
           const tr = document.createElement('tr');
           tr.innerHTML = `
 <td>${esc(r.llm_score)}</td>
@@ -180,11 +199,14 @@ def index() -> str:
 <td>${esc(r.scraping_date)}</td>
 <td>${r.job_url?`<a href="${esc(r.job_url)}" target="_blank">link</a>`:''}</td>
 <td title="${esc(r.llm_motivazione)}">${tronc(r.llm_motivazione,80)}</td>
-<td><input type="checkbox" class="chk-viewed" data-id="${r.id}" ${r.viewed?'checked':''}/></td>
-<td><input type="checkbox" class="chk-applied" data-id="${r.id}" ${r.applied?'checked':''}/></td>
+<td><select class="flag-select" data-id="${r.id}">
+<option value="not_viewed" ${flagVal === 'not_viewed' ? 'selected' : ''}>Not viewed</option>
+<option value="viewed" ${flagVal === 'viewed' ? 'selected' : ''}>Viewed</option>
+<option value="interested" ${flagVal === 'interested' ? 'selected' : ''}>Interested</option>
+<option value="applied" ${flagVal === 'applied' ? 'selected' : ''}>Applied</option>
+</select></td>
 <td><input type="text" value="${esc(r.notes)}" data-id="${r.id}" class="note" style="width:140px"/></td>
-`;
-
+  `;
           rowsEl.appendChild(tr);
           tr.querySelector('td[title]').style.cursor = 'pointer';
           tr.querySelector('td[title]').onclick = function() {
@@ -192,15 +214,40 @@ def index() -> str:
           };
         });
         pageInfoEl.textContent = `Page ${data.page} / ${data.total_pages} — ${data.total_rows} rows`;
-        metaEl.textContent = `order_by=${orderByEl.value} ${orderDirEl.value} | mode=${onlyViewedEl.checked ? 'viewed' : 'unviewed'}`;
-        document.querySelectorAll('.chk-viewed').forEach(chk => chk.onchange = async e => {
-          const id = chk.getAttribute('data-id');
-          await fetch(`/jobs/${id}/flags`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({viewed:chk.checked})});
-        });
-        document.querySelectorAll('.chk-applied').forEach(chk => chk.onchange = async e => {
-          const id = chk.getAttribute('data-id');
-          await fetch(`/jobs/${id}/flags`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({applied:chk.checked,viewed:chk.checked})});
-          const viewedChk = document.querySelector(`.chk-viewed[data-id="${id}"]`);if(viewedChk) viewedChk.checked=chk.checked;
+        metaEl.textContent = `order_by=${orderByEl.value} ${orderDirEl.value} | mode=${document.getElementById('mainFlagFilter').value}`;
+        document.querySelectorAll('.flag-select').forEach(sel => {
+          sel.onchange = async function(e) {
+            const id = this.getAttribute('data-id');
+            const val = this.value;
+            
+            const body = {
+              viewed: val === 'viewed',
+              interested: val === 'interested',
+              applied: val === 'applied'
+            };
+            
+            try {
+              const response = await fetch(`/jobs/${id}/flags`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(body)
+              });
+              
+              if (!response.ok) {
+                const errorText = await response.text();
+                console.error('Update failed:', errorText);
+                alert(`Errore durante l'aggiornamento: ${errorText}`);
+                load(); // Ricarica solo in caso di errore
+              } else {
+                // Successo: semplicemente logga, NON rimuovere la riga
+                console.log(`Flag aggiornato per job ${id}: ${val}`);
+                // La riga rimane visibile anche se non appartiene più al filtro corrente
+              }
+            } catch (error) {
+              console.error('Network error:', error);
+              alert(`Errore di rete: ${error.message}`);
+            }
+          };
         });
         document.querySelectorAll('.note').forEach(inp => inp.onchange = async e => {
           const id = inp.getAttribute('data-id');
@@ -215,19 +262,21 @@ def index() -> str:
     document.getElementById('reload').onclick = () => { page = 1; load(); };
     document.getElementById('prev').onclick = () => { if(page>1){page--;load();}};
     document.getElementById('next').onclick = () => {page++;load();};
-    onlyViewedEl.onchange = () => { page = 1; load(); };
-    document.getElementById('copyViewedUrls').onclick = async ()=>{
-      // Raccoglie gli URL dalle righe attualmente visualizzate nella tabella che hanno viewed=true
-      const viewedRows = document.querySelectorAll('.chk-viewed:checked');
+    document.getElementById('mainFlagFilter').onchange = () => { page = 1; load(); };
+    document.getElementById('copyInterestedUrls').onclick = async () => {
+      // Trova tutte le righe con il dropdown impostato su "interested"
+      const interestedSelects = Array.from(document.querySelectorAll('.flag-select'))
+        .filter(sel => sel.value === 'interested');
+      
       const urls = [];
-      viewedRows.forEach(chk => {
-        const id = chk.getAttribute('data-id');
-        const row = chk.closest('tr');
+      interestedSelects.forEach(sel => {
+        const row = sel.closest('tr');
         const linkEl = row.querySelector('a[href]');
         if (linkEl) {
           urls.push(linkEl.href);
         }
       });
+      
       if (urls.length > 0) { 
         await navigator.clipboard.writeText(urls.join('\\n')); 
         alert(`Copied ${urls.length} URLs to clipboard`); 
@@ -261,17 +310,16 @@ def index() -> str:
         box-shadow:0 0 20px rgba(0,0,0,0.6);
       `;
       
-      // Sezioni colorate con tema scuro
       const sections = text.split(/(\*\*Punti Positivi \(\+\):\*\*|\*\*Punti Negativi \(-\):\*\*|\*\*Analisi Punteggi:\*\*)/);
       
       let currentBg = '';
       sections.forEach(section => {
         if (section.includes('Punti Positivi')) {
-          currentBg = '#245c3a'; // verde leggermente più chiaro
+          currentBg = '#245c3a';
         } else if (section.includes('Punti Negativi')) {
-          currentBg = '#5c2a2a'; // rosso leggermente più chiaro
+          currentBg = '#5c2a2a';
         } else if (section.includes('Analisi Punteggi')) {
-          currentBg = '#24465c'; // blu leggermente più chiaro
+          currentBg = '#24465c';
         }
 
         if (section.trim() && !section.startsWith('**')) {
