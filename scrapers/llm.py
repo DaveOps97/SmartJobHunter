@@ -105,12 +105,11 @@ purché l'offerta di lavoro sia interessante; stesso discorso per altri paesi es
 CRITERI DI VALUTAZIONE:
 Assegna uno score 0-10 per ciascun criterio, dove i pesi indicano l'importanza relativa nel calcolo finale:
 
-1. score_competenze (peso 40% - CRITICO): allineamento con linguaggi, framework, metodologie e dominio del ruolo
-2. score_azienda (peso 20% - IMPORTANTE): reputazione, cultura collaborativa, innovazione, formazione, tecnologie moderne; preferenza per startup/aziende giovani e dinamiche
+1. score_competenze (peso 40% - CRITICO): allineamento con linguaggi, framework, metodologie e dominio del ruolo. Dai score 0 se il ruolo è senior.
+2. score_azienda (peso 25% - IMPORTANTE): reputazione, cultura collaborativa, innovazione, formazione, tecnologie moderne; preferenza per startup/aziende giovani e dinamiche
 3. score_stipendio (peso 15% - IMPORTANTE): competitività per profilo junior, benefit significativi, smart working, flessibilità
 4. score_località (peso 10% - MODERATO): corrispondenza con aree preferite o remote work/relocation accettabile
 5. score_crescita (peso 10% - MODERATO): mentorship, percorsi di crescita, formazione, progetti sfidanti
-6. score_coerenza (peso 5% - MINORE): adeguatezza responsabilità e mansioni al livello junior
 
 SCALA PUNTEGGI (0-10):
 - 0-2: Molto scarso/assente
@@ -126,7 +125,7 @@ PROCESSO DI VALUTAZIONE:
 	- **Punti Positivi (+):** lista elementi allineati a profilo/preferenze
 	- **Punti Negativi (-):** lista criticità, mancanze o disallineamenti
 	- **Analisi Punteggi:** riepiloga i singoli punteggi assegnati ai sei criteri, riportando un breve commento per ciascuno nel formato:
-	* Nome criterio (x/10):* commento sintetico
+		- [Nome_criterio] (x/10): commento sintetico
 4. Nel campo match_competenze, elenca le competenze tecniche specifiche che matchano
 Rispondi in italiano, mantenendo i termini tecnici in inglese."""
 

@@ -85,14 +85,14 @@ def main():
     
     # === JobSpy Scraping ===
     print("=== INIZIO SCRAPING JOBSPY ===")
-    jobspy_df = scrape_all_locations(locations=locations, search_term=jobspy_search_term, hours_old=720, results_wanted=300)
+    jobspy_df = scrape_all_locations(locations=locations, search_term=jobspy_search_term, hours_old=26, results_wanted=60) # 26, 60
     
     # === HiringCafe Scraping ===
     print("\n=== INIZIO SCRAPING HIRINGCAFE ===")
     hiring_query = ''
     
     # Fetch da HiringCafe
-    hiring_df = fetch_hiring_cafe_dataframe(expected_columns=expected_columns, search_query=hiring_query, date_filter= "1_month", max_pages=8)
+    hiring_df = fetch_hiring_cafe_dataframe(expected_columns=expected_columns, search_query=hiring_query, date_filter= "1_day", max_pages=3)
     
     # === Combinazione e salvataggio ===
     print(f"\n=== COMBINAZIONE FONTI ===")

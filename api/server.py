@@ -107,6 +107,7 @@ def index() -> str:
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ListScraper</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>💼</text></svg>">
     <style>
       body { 
         font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; 
@@ -310,6 +311,7 @@ def index() -> str:
         box-shadow:0 0 20px rgba(0,0,0,0.6);
       `;
       
+      // Split sui marcatori delle sezioni
       const sections = text.split(/(\*\*Punti Positivi \(\+\):\*\*|\*\*Punti Negativi \(-\):\*\*|\*\*Analisi Punteggi:\*\*)/);
       
       let currentBg = '';
@@ -321,7 +323,6 @@ def index() -> str:
         } else if (section.includes('Analisi Punteggi')) {
           currentBg = '#24465c';
         }
-
         if (section.trim() && !section.startsWith('**')) {
           const div = document.createElement('div');
           div.style.cssText = `
@@ -331,7 +332,13 @@ def index() -> str:
             border-radius:8px;
             white-space:pre-wrap;
           `;
-          div.textContent = section.trim();
+          // Converti **testo** in grassetto, rimuovi :* e normalizza spazi multipli
+          let htmlContent = section.trim()
+            .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')  // Grassetti **testo**
+            .replace(/:\*/g, ':')  // Rimuove * dopo i due punti (:* -> :)
+            .replace(/\*\s{2,}/g, '* ');  // Normalizza spazi multipli dopo * a uno spazio singolo
+          
+          div.innerHTML = htmlContent;
           modal.appendChild(div);
         } else if (section.startsWith('**')) {
           const title = document.createElement('h3');
@@ -341,6 +348,7 @@ def index() -> str:
             border-bottom:1px solid #444;
             padding-bottom:4px;
           `;
+          // Rimuovi gli asterischi dal titolo
           title.textContent = section.replace(/\*\*/g, '');
           modal.appendChild(title);
         }

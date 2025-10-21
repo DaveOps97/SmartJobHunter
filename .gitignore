@@ -1,6 +1,9 @@
 .env
 .DS_Store
 storage/*.csv
-storage/*.db
+*.db
+*.log
+*.err
+*.out
 __pycache__
 .cursor
