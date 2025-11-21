@@ -276,9 +276,13 @@ def query_jobs(
 
         # Protezione basilare su nome colonna: usa backticks
         order_col = order_by.replace("`", "")
+
+        # Aggiungi sempre scraping_date DESC come ordinamento secondario
+        order_clause = f"ORDER BY `{order_col}` {order_dir} NULLS LAST, `scraping_date` DESC, id {order_dir}"
+
         sql = (
             f"SELECT * FROM jobs {where_clause} "
-            f"ORDER BY `{order_col}` {order_dir} NULLS LAST, id {order_dir} "
+            f"{order_clause} "
             f"LIMIT ? OFFSET ?"
         )
         cur.execute(sql, (page_size, offset))
