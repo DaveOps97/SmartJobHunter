@@ -80,7 +80,7 @@ def search_hiring_cafe(search_query: str = "", date_filter="1_week", page: int =
 
 
 def normalize_hiring_cafe_jobs_to_schema(jobs: list[dict], expected_columns: list[str]) -> pd.DataFrame:
-    """Mappa i job HiringCafe (schema results[v5_processed_job_data,...]) allo schema CSV esistente."""
+    """Mappa i job HiringCafe (schema results[v5_processed_job_data,...]) allo schema DataFrame standard."""
 
     # Helper per serializzare liste in una singola stringa contenente TUTTI i valori
     def join_all(values, sep: str = "; "):

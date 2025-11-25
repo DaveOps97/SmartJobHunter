@@ -1,9 +1,13 @@
 .env
 .DS_Store
 storage/*.csv
+storage/*.db
+storage/*.db-*
 *.db
+*.db-*
 *.log
 *.err
 *.out
 __pycache__
 .cursor
+chrome_profile_hiringcafe

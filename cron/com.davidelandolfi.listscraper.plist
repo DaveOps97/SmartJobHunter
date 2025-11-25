@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.davidelandolfi.listscraper</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/davidelandolfi/PyProjects/ListScraper/cron/cron_ls.sh</string>
+    </array>
+
+    <!-- Esecuzione giornaliera alle 10:00 -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>10</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <!-- NON eseguire al caricamento del plist, solo schedule -->
+    <key>RunAtLoad</key>
+    <false/>
+
+    <!-- Non riavviare automaticamente se termina con successo -->
+    <key>KeepAlive</key>
+    <false/>
+
+    <!-- Previene rilanci troppo frequenti in caso di crash -->
+    <key>ThrottleInterval</key>
+    <integer>300</integer>
+
+    <!-- Timeout esteso per job lunghi (6.5 ore) -->
+    <key>ExitTimeOut</key>
+    <integer>23400</integer>
+
+    <!-- Log persistenti nella directory del progetto -->
+    <key>StandardOutPath</key>
+    <string>/Users/davidelandolfi/PyProjects/ListScraper/storage/launchd.stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/davidelandolfi/PyProjects/ListScraper/storage/launchd.stderr.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/davidelandolfi/PyProjects/ListScraper</string>
+
+    <!-- Tipo di processo per gestione risorse ottimale -->
+    <key>ProcessType</key>
+    <string>Background</string>
+
+</dict>
+</plist>

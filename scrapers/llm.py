@@ -105,7 +105,7 @@ purché l'offerta di lavoro sia interessante; stesso discorso per altri paesi es
 CRITERI DI VALUTAZIONE:
 Assegna uno score 0-10 per ciascun criterio, dove i pesi indicano l'importanza relativa nel calcolo finale:
 
-1. score_competenze (peso 40% - CRITICO): allineamento con linguaggi, framework, metodologie e dominio del ruolo. Dai score 0 se il ruolo è senior.
+1. score_competenze (peso 40% - CRITICO): allineamento con linguaggi, framework, metodologie e dominio del ruolo. Dai score 0 se il ruolo è senior o mid level.
 2. score_azienda (peso 25% - IMPORTANTE): reputazione, cultura collaborativa, innovazione, formazione, tecnologie moderne; preferenza per startup/aziende giovani e dinamiche
 3. score_stipendio (peso 15% - IMPORTANTE): competitività per profilo junior, benefit significativi, smart working, flessibilità
 4. score_località (peso 10% - MODERATO): corrispondenza con aree preferite o remote work/relocation accettabile
@@ -440,19 +440,21 @@ def enrich_dataframe_with_llm(df: pd.DataFrame) -> pd.DataFrame:
 	print(f"Elaborazione di {total_rows} offerte di lavoro...")
 	
 	# Usa tqdm per la barra di progresso con informazioni dettagliate
+	# miniters=50: aggiorna ogni 50 iterazioni invece di ogni 1
+	# mininterval=1.0: aggiorna almeno ogni secondo
+	# position=0, leave=True: mantiene la barra sulla stessa riga
 	progress_bar = tqdm(
 		df.iterrows(), 
 		total=total_rows,
-		ncols = 100,
+		ncols=100,
 		desc="Elaborazione LLM",
 		unit="offerta",
+		miniters=50,  # Aggiorna ogni 50 iterazioni
+		#mininterval=1.0,  # Aggiorna almeno ogni secondo
 		bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
 	)
 
 	for idx, row in progress_bar:
-		# Aggiorna la descrizione della barra con il numero di riga corrente
-		progress_bar.set_description(f"Elaborazione LLM (riga {idx+1}/{total_rows})")
-		
 		res = evaluate_job(row.to_dict())
 		new_cols["llm_score"].append(int(res.get("score", 0)))
 		new_cols["llm_score_competenze"].append(int(res.get("score_competenze", 0)))
@@ -462,7 +464,7 @@ def enrich_dataframe_with_llm(df: pd.DataFrame) -> pd.DataFrame:
 		new_cols["llm_score_crescita"].append(int(res.get("score_crescita", 0)))
 		new_cols["llm_score_coerenza"].append(int(res.get("score_coerenza", 0)))
 		new_cols["llm_motivazione"].append(str(res.get("motivazione", "")))
-		# serializza lista in JSON per CSV
+		# serializza lista in JSON per storage nel database
 		new_cols["llm_match_competenze"].append(json.dumps(res.get("match_competenze", []), ensure_ascii=False))
 
 	# Chiudi la barra di progresso

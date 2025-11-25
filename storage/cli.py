@@ -2,10 +2,6 @@
 CLI per consultare offerte (paginazione/ordinamento) e segnare viewed/applied/notes.
 
 Esempi:
-  # Importa CSV in SQLite
-  python -m storage.sync_csv_to_sqlite --csv /Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.csv \
-      --db /Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.db --chunksize 3000
-
   # Lista prima pagina ordinata per score decrescente (default)
   python -m storage.cli list --db /Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.db \
       --page 1 --page-size 50 --order-by llm_score --order-dir desc
@@ -66,13 +62,15 @@ def build_parser() -> argparse.ArgumentParser:
 
 def cmd_list(args: argparse.Namespace) -> None:
     db_path = os.path.abspath(args.__dict__["db"])  # preserva assoluto
+    # Se only_unviewed è True, filtra per not_viewed, altrimenti mostra tutti (mode non valido = nessun filtro)
+    mode = "not_viewed" if args.only_unviewed else ""
     rows, total_rows, total_pages = query_jobs(
         db_path=db_path,
         page=args.page,
         page_size=args.page_size,
         order_by=args.order_by,
         order_dir=args.order_dir,
-        only_unviewed=args.only_unviewed,
+        mode=mode,
     )
 
     if args.__dict__.get("json"):

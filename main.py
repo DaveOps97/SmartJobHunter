@@ -7,8 +7,9 @@ import pandas as pd
 from datetime import datetime
 from pathlib import Path
 from scrapers import scrape_all_locations, fetch_hiring_cafe_dataframe
-from scrapers.utils import align_columns, get_expected_columns, save_jobs_to_csv
-from scrapers.llm import initialize_api_key
+from scrapers.utils import align_columns, get_expected_columns
+from scrapers.llm import initialize_api_key, enrich_dataframe_with_llm
+from storage.sqlite_db import upsert_jobs, get_existing_job_ids
 
 
 def load_env_from_root():
@@ -85,34 +86,40 @@ def main():
     
     # === JobSpy Scraping ===
     print("=== INIZIO SCRAPING JOBSPY ===")
-    jobspy_df = scrape_all_locations(locations=locations, search_term=jobspy_search_term, hours_old=26, results_wanted=60) # 26, 60
+    jobspy_df = scrape_all_locations(locations=locations, search_term=jobspy_search_term, hours_old=26, results_wanted=60) # 26(60), 60(120), 128(150)
     
     # === HiringCafe Scraping ===
     print("\n=== INIZIO SCRAPING HIRINGCAFE ===")
     hiring_query = ''
     
-    # Fetch da HiringCafe
-    hiring_df = fetch_hiring_cafe_dataframe(expected_columns=expected_columns, search_query=hiring_query, date_filter= "1_day", max_pages=3)
+    # Fetch da HiringCafe (può essere commentato se non si vuole usare)
+    hiring_df = None
+    # hiring_df = fetch_hiring_cafe_dataframe(expected_columns=expected_columns, search_query=hiring_query, date_filter= "1_day", max_pages=3)
     
     # === Combinazione e salvataggio ===
     print(f"\n=== COMBINAZIONE FONTI ===")
     
-    # Allinea colonne
-    jobspy_aligned = align_columns(jobspy_df, expected_columns)
-    hiring_aligned = align_columns(hiring_df, expected_columns)
-    
-    # Unione fonti e deduplicazione (filtra DF vuoti per evitare FutureWarning)
+    # Allinea colonne e prepara i DataFrame (gestisce None e DataFrame vuoti)
     frames = []
-    for df in [jobspy_aligned, hiring_aligned]:
-        if df is not None and not df.empty and len(df) > 0:
-            # Assicurati che il DataFrame abbia tutte le colonne attese prima della concatenazione
-            df_with_all_cols = align_columns(df, expected_columns)
-            frames.append(df_with_all_cols)
     
+    if jobspy_df is not None and not jobspy_df.empty:
+        jobspy_aligned = align_columns(jobspy_df, expected_columns)
+        if not jobspy_aligned.empty:
+            frames.append(jobspy_aligned)
+            print(f"JobSpy: {len(jobspy_aligned)} job raccolti")
+    
+    if hiring_df is not None and not hiring_df.empty:
+        hiring_aligned = align_columns(hiring_df, expected_columns)
+        if not hiring_aligned.empty:
+            frames.append(hiring_aligned)
+            print(f"HiringCafe: {len(hiring_aligned)} job raccolti")
+    
+    # Unione fonti e deduplicazione
     if frames:
         all_sources = pd.concat(frames, ignore_index=True)
     else:
         all_sources = pd.DataFrame(columns=expected_columns)
+        print("⚠️  Nessun job raccolto dalle fonti configurate")
     all_sources_unique = all_sources.dropna(subset=['id']) if 'id' in all_sources.columns else all_sources
     all_sources_unique = all_sources_unique.drop_duplicates(subset=['id'], keep='first') if 'id' in all_sources_unique.columns else all_sources_unique
     
@@ -120,11 +127,60 @@ def main():
     if not all_sources_unique.empty:
         all_sources_unique['scraping_date'] = scraping_date
     
-    print(f"Totale raccolti (jobspy + hiring.cafe): {len(all_sources_unique)} unici")
+    print(f"Totale raccolti: {len(all_sources_unique)} unici")
     
-    # Salvataggio finale (CSV "canonico" usato come sorgente per il DB)
-    file_path = "/Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.csv"
-    save_jobs_to_csv(all_sources_unique, file_path)
+    # Salvataggio diretto nel database SQLite
+    DB_PATH = "/Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.db"
+    
+    if all_sources_unique.empty:
+        print("Nessun job da processare.")
+        return
+    
+    try:
+        # === Identificazione job nuovi vs esistenti ===
+        print(f"\n=== IDENTIFICAZIONE JOB NUOVI ===")
+        updated_jobs_df = None
+        
+        if 'id' not in all_sources_unique.columns:
+            print("⚠️  Attenzione: colonna 'id' mancante, tutti i job saranno considerati nuovi")
+            new_jobs_df = all_sources_unique.copy()
+            existing_job_ids = set()
+        else:
+            job_ids = all_sources_unique['id'].astype(str).tolist()
+            existing_job_ids = get_existing_job_ids(DB_PATH, job_ids)
+            new_jobs_mask = ~all_sources_unique['id'].astype(str).isin(existing_job_ids)
+            new_jobs_df = all_sources_unique[new_jobs_mask].copy()
+            updated_jobs_df = all_sources_unique[~new_jobs_mask].copy()
+            
+            print(f"Job già presenti nel DB: {len(existing_job_ids)}")
+            print(f"Job nuovi da processare: {len(new_jobs_df)}")
+            if updated_jobs_df is not None and not updated_jobs_df.empty:
+                print(f"Job da aggiornare: {len(updated_jobs_df)}")
+        
+        # === Arricchimento LLM solo per job nuovi ===
+        if not new_jobs_df.empty:
+            print(f"\n=== ARRICCHIMENTO LLM PER JOB NUOVI ===")
+            new_jobs_enriched = enrich_dataframe_with_llm(new_jobs_df)
+            
+            # Combina job nuovi arricchiti con job aggiornati (senza LLM)
+            if updated_jobs_df is not None and not updated_jobs_df.empty:
+                all_jobs_final = pd.concat([new_jobs_enriched, updated_jobs_df], ignore_index=True)
+            else:
+                all_jobs_final = new_jobs_enriched
+        else:
+            print("\n=== NESSUN JOB NUOVO, AGGIORNAMENTO SOLO JOB ESISTENTI ===")
+            all_jobs_final = all_sources_unique
+        
+        # === Salvataggio finale nel database ===
+        print(f"\n=== SALVATAGGIO NEL DATABASE ===")
+        inserted, updated = upsert_jobs(DB_PATH, all_jobs_final, batch_size=2000)
+        print(f"✅ DB aggiornato: {inserted} nuovi, {updated} aggiornati")
+        
+    except Exception as e:
+        print(f"❌ Errore durante il salvataggio nel database: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 
 

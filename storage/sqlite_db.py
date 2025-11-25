@@ -1,9 +1,9 @@
 """
-Modulo SQLite: schema, import incrementale da CSV (chunked), query paginate/ordinate,
+Modulo SQLite: schema, upsert diretto da DataFrame (chunked), query paginate/ordinate,
 e aggiornamento flag utente (viewed/interested/applied/notes).
 
-Nota: pensato per CSV molto grandi (10k-20k+ righe, 38+ colonne) con memoria
-stabile grazie a pandas.read_csv(..., chunksize=N).
+Nota: pensato per DataFrame molto grandi (10k-20k+ righe, 38+ colonne) con memoria
+stabile grazie a chunking manuale.
 """
 
 from __future__ import annotations
@@ -11,11 +11,16 @@ from __future__ import annotations
 import os
 import math
 import sqlite3
+import logging
+import time
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
+
+# Setup logging
+logger = logging.getLogger(__name__)
 
 
 # Colonne note dallo schema del progetto (vedi scrapers/utils.get_expected_columns)
@@ -58,6 +63,10 @@ def get_connection(db_path: str):
         conn.execute("PRAGMA temp_store=MEMORY;")
         yield conn
         conn.commit()
+    except sqlite3.Error as e:
+        conn.rollback()
+        logger.error(f"SQLite error: {e}")
+        raise
     finally:
         conn.close()
 
@@ -73,21 +82,21 @@ def _map_sql_type(column_name: str) -> str:
     return "TEXT"
 
 
-def initialize_db(db_path: str, csv_columns: List[str]) -> None:
-    """Crea lo schema se non esiste con colonne dinamiche dal CSV + flag utente.
+def initialize_db(db_path: str, columns: List[str]) -> None:
+    """Crea lo schema se non esiste con colonne dinamiche dal DataFrame + flag utente.
 
-    - Chiave primaria: id (TEXT) se presente nel CSV, altrimenti rowid implicito
+    - Chiave primaria: id (TEXT) se presente nelle colonne, altrimenti rowid implicito
     - Indici utili su colonne di ordinamento comuni
     """
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
     with get_connection(db_path) as conn:
         cur = conn.cursor()
 
-        has_id = "id" in csv_columns
+        has_id = "id" in columns
 
         # Definisci colonne
         column_defs: List[str] = []
-        for col in csv_columns:
+        for col in columns:
             sql_type = _map_sql_type(col)
             column_defs.append(f"`{col}` {sql_type}")
 
@@ -131,7 +140,7 @@ def initialize_db(db_path: str, csv_columns: List[str]) -> None:
         if has_id:
             cur.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_id ON jobs(id)")
         for idx_col in ["llm_score", "date_posted", "company", "location", "title", "scraping_date"]:
-            if idx_col in csv_columns or idx_col in KNOWN_INTEGER_COLUMNS:
+            if idx_col in columns or idx_col in KNOWN_INTEGER_COLUMNS:
                 cur.execute(
                     f"CREATE INDEX IF NOT EXISTS idx_jobs_{idx_col} ON jobs({idx_col})"
                 )
@@ -159,71 +168,151 @@ def _to_python_value(col: str, value: Any) -> Any:
     return value
 
 
-def upsert_jobs_from_csv(csv_path: str, db_path: str, chunksize: int = 2000) -> Tuple[int, int]:
-    """Import incrementale del CSV in SQLite con UPSERT su `id`.
+def get_existing_job_ids(db_path: str, job_ids: List[str]) -> set[str]:
+    """Identifica quali job ID sono già presenti nel database.
+    
+    Args:
+        db_path: Percorso al database SQLite
+        job_ids: Lista di ID da verificare
+        
+    Returns:
+        Set di ID già presenti nel database
+    """
+    if not job_ids:
+        return set()
+    
+    try:
+        with get_connection(db_path) as conn:
+            cur = conn.cursor()
+            # Verifica se la tabella esiste
+            cur.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='jobs'")
+            if not cur.fetchone():
+                return set()
+            
+            # Verifica se la colonna id esiste
+            cur.execute("PRAGMA table_info(jobs)")
+            columns = [row[1] for row in cur.fetchall()]
+            if "id" not in columns:
+                return set()
+            
+            # Query per trovare gli ID esistenti
+            placeholders = ",".join(["?"] * len(job_ids))
+            cur.execute(f"SELECT id FROM jobs WHERE id IN ({placeholders})", job_ids)
+            existing_ids = {str(row[0]) for row in cur.fetchall()}
+            return existing_ids
+    except sqlite3.Error as e:
+        logger.warning(f"Errore durante la verifica degli ID esistenti: {e}")
+        return set()
+
+
+def upsert_jobs(db_path: str, jobs_dataframe: pd.DataFrame, batch_size: int = 2000) -> Tuple[int, int]:
+    """Upsert diretto di un DataFrame in SQLite con chunking per performance.
 
     Preserva i flag utente esistenti (viewed/interested/applied/notes) durante gli update.
+    Aggiunge automaticamente scraping_date se mancante.
+
+    Args:
+        db_path: Percorso al database SQLite
+        jobs_dataframe: DataFrame pandas con i job da inserire/aggiornare
+        batch_size: Dimensione dei chunk per il processing (default: 2000)
 
     Returns:
         (num_inserted, num_updated)
-    """
-    if not os.path.exists(csv_path):
-        raise FileNotFoundError(csv_path)
 
-    # Leggi primo chunk per colonne
-    first_iter = pd.read_csv(csv_path, nrows=0)
-    csv_columns = list(first_iter.columns)
-    initialize_db(db_path, csv_columns)
+    Raises:
+        sqlite3.Error: In caso di errori SQLite (con retry automatico)
+    """
+    if jobs_dataframe is None or jobs_dataframe.empty:
+        logger.info("DataFrame vuoto, nessun upsert necessario")
+        return 0, 0
+
+    # Aggiungi scraping_date se mancante
+    if 'scraping_date' not in jobs_dataframe.columns:
+        scraping_date = datetime.now().strftime("%Y-%m-%d")
+        jobs_dataframe = jobs_dataframe.copy()
+        jobs_dataframe['scraping_date'] = scraping_date
+        logger.info(f"Aggiunto scraping_date automatico: {scraping_date}")
+
+    # Ottieni colonne dal DataFrame
+    df_columns = list(jobs_dataframe.columns)
+    initialize_db(db_path, df_columns)
 
     inserted = 0
     updated = 0
+    has_id = "id" in df_columns
 
-    has_id = "id" in csv_columns
+    # Retry logic con exponential backoff
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            with get_connection(db_path) as conn:
+                cur = conn.cursor()
 
-    with get_connection(db_path) as conn:
-        cur = conn.cursor()
+                # Setup statements
+                placeholders = ",".join(["?"] * len(df_columns))
 
-        # Setup statements
-        placeholders = ",".join(["?"] * len(csv_columns))
+                if has_id:
+                    # On conflict su id aggiorna tutte le colonne del DataFrame ma non toccare i flag utente
+                    update_assignments = ",".join([f"`{c}`=excluded.`{c}`" for c in df_columns if c != "id"])
+                    sql = (
+                        f"INSERT INTO jobs (" + ",".join([f"`{c}`" for c in df_columns]) + ") "
+                        f"VALUES ({placeholders}) "
+                        f"ON CONFLICT(id) DO UPDATE SET {update_assignments}"
+                    )
+                else:
+                    # Nessun id: inserimenti semplici
+                    sql = (
+                        f"INSERT INTO jobs (" + ",".join([f"`{c}`" for c in df_columns]) + ") "
+                        f"VALUES ({placeholders})"
+                    )
 
-        if has_id:
-            # On conflict su id aggiorna tutte le colonne del CSV ma non toccare i flag utente
-            update_assignments = ",".join([f"`{c}`=excluded.`{c}`" for c in csv_columns if c != "id"])
-            sql = (
-                f"INSERT INTO jobs (" + ",".join([f"`{c}`" for c in csv_columns]) + ") "
-                f"VALUES ({placeholders}) "
-                f"ON CONFLICT(id) DO UPDATE SET {update_assignments}"
-            )
-        else:
-            # Nessun id: inserimenti semplici
-            sql = (
-                f"INSERT INTO jobs (" + ",".join([f"`{c}`" for c in csv_columns]) + ") "
-                f"VALUES ({placeholders})"
-            )
+                # Processa in chunk per evitare memory overflow
+                total_rows = len(jobs_dataframe)
+                num_chunks = math.ceil(total_rows / batch_size)
+                logger.info(f"Processing {total_rows} righe in {num_chunks} chunk(s) di {batch_size}")
 
-        for chunk in pd.read_csv(csv_path, chunksize=chunksize):
-            chunk = chunk.where(pd.notna(chunk), None)
-            rows = []
-            for _, row in chunk.iterrows():
-                values = [_to_python_value(col, row.get(col)) for col in csv_columns]
-                rows.append(tuple(values))
+                for chunk_idx in range(num_chunks):
+                    start_idx = chunk_idx * batch_size
+                    end_idx = min((chunk_idx + 1) * batch_size, total_rows)
+                    chunk = jobs_dataframe.iloc[start_idx:end_idx].copy()
 
-            if not rows:
-                continue
+                    chunk = chunk.where(pd.notna(chunk), None)
+                    rows = []
+                    for _, row in chunk.iterrows():
+                        values = [_to_python_value(col, row.get(col)) for col in df_columns]
+                        rows.append(tuple(values))
 
-            if has_id:
-                # Per misurare inserted vs updated: contiamo quanti id esistono già
-                ids = [str(r[csv_columns.index("id")]) for r in rows]
-                q_marks = ",".join(["?"] * len(ids))
-                cur.execute(f"SELECT COUNT(1) FROM jobs WHERE id IN ({q_marks})", ids)
-                existing_count = cur.fetchone()[0]
-                cur.executemany(sql, rows)
-                inserted += len(rows) - existing_count
-                updated += existing_count
+                    if not rows:
+                        continue
+
+                    if has_id:
+                        # Per misurare inserted vs updated: contiamo quanti id esistono già
+                        ids = [str(r[df_columns.index("id")]) for r in rows]
+                        q_marks = ",".join(["?"] * len(ids))
+                        cur.execute(f"SELECT COUNT(1) FROM jobs WHERE id IN ({q_marks})", ids)
+                        existing_count = cur.fetchone()[0]
+                        cur.executemany(sql, rows)
+                        inserted += len(rows) - existing_count
+                        updated += existing_count
+                    else:
+                        cur.executemany(sql, rows)
+                        inserted += len(rows)
+
+                    logger.info(f"Chunk {chunk_idx + 1}/{num_chunks} processato: {len(rows)} righe")
+
+            # Successo: esci dal retry loop
+            break
+
+        except sqlite3.Error as e:
+            if attempt < max_retries - 1:
+                wait_time = (2 ** attempt) * 0.1  # Exponential backoff: 0.1s, 0.2s, 0.4s
+                logger.warning(f"SQLite error (tentativo {attempt + 1}/{max_retries}): {e}. Retry tra {wait_time}s...")
+                time.sleep(wait_time)
             else:
-                cur.executemany(sql, rows)
-                inserted += len(rows)
+                logger.error(f"SQLite error dopo {max_retries} tentativi: {e}")
+                raise
 
+    logger.info(f"Upsert completato: {inserted} inseriti, {updated} aggiornati")
     return inserted, updated
 
 

@@ -5,21 +5,18 @@
 
 ListScraper automatizza il processo di ricerca del lavoro attraverso un sistema in due fasi:
 
-1) Il sistema esegue web scraping su diverse piattaforme di recruitment usando la libreria JobSpy, raccogliendo dati strutturati sulle offerte di lavoro disponibili. Le informazioni estratte includono titolo della posizione, azienda, località, descrizione del lavoro e altri dettagli rilevanti. I dati vengono salvati in formato CSV per facilitare l'elaborazione successiva.
-2) Ogni riga del CSV viene processata da un Large Language Model che analizza la job description e altre informazioni pertinenti. L'LLM valuta se l'offerta corrisponde alle preferenze personali e alle competenze specificate, filtrando automaticamente le opportunità più rilevanti.
+1) Il sistema esegue web scraping su diverse piattaforme di recruitment usando la libreria JobSpy, raccogliendo dati strutturati sulle offerte di lavoro disponibili. Le informazioni estratte includono titolo della posizione, azienda, località, descrizione del lavoro e altri dettagli rilevanti. I dati vengono salvati direttamente nel database SQLite durante lo scraping.
+2) Ogni riga viene processata da un Large Language Model che analizza la job description e altre informazioni pertinenti. L'LLM valuta se l'offerta corrisponde alle preferenze personali e alle competenze specificate, filtrando automaticamente le opportunità più rilevanti.
 
-Per gestire il CSV di grandi dimensioni contenente le offerte raccolte, il progetto include un layer SQLite con import a chunk, paginazione e flag utente (visionato/interessato/applicato).
+Il progetto utilizza un'architettura **DB-first**: lo scraping scrive direttamente nel database SQLite con upsert incrementale, paginazione e flag utente (visionato/interessato/applicato).
 
-### 1) Sincronizza il CSV in SQLite
+## Architettura
 
-```bash
-python -m storage.sync_csv_to_sqlite --csv /Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.csv \
-  --db /Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.db --chunksize 3000
-```
+**Workflow attuale**: Scraping → Upsert diretto DB
 
-L'import è idempotente: usa `id` come chiave e fa upsert preservando i flag utente.
+Il sistema esegue lo scraping da multiple fonti, combina e deduplica i risultati, e scrive direttamente nel database SQLite tramite upsert incrementale. I flag utente (viewed/interested/applied/notes) vengono preservati durante gli aggiornamenti.
 
-### 2) Consulta e aggiorna via CLI
+### Consulta e aggiorna via CLI
 
 Lista paginata e ordinata (default: score decrescente):
 
@@ -46,11 +43,6 @@ python -m storage.cli set --db /Users/davidelandolfi/PyProjects/ListScraper/stor
 
 Opzioni utili per l'ordinamento: `--order-by llm_score|date_posted|company|title|scraping_date` con `--order-dir asc|desc`.
 
-### Alternative e varianti
-
-- DuckDB: eccellente per query analitiche e formato colonnare; può leggere Parquet direttamente (`SELECT * FROM 'jobs.parquet' LIMIT ...`). Se preferisci evitare uno step di import, valuta un export diretto a Parquet e query DuckDB on-the-fly.
-- Parquet + Polars: lettura lazy/paginata efficiente; ottimo se vuoi trasformazioni complesse in locale.
-- SQLite resta la scelta più semplice per flagging transazionale (viewed/applied) e un'interfaccia CLI snella.
 
 ## Setup rapido
 
@@ -63,14 +55,19 @@ Se usi l’arricchimento LLM, esporta la chiave:
 export FREE_GEMINI_API_KEY=...
 ```
 
-### Esecuzione giornaliera (scraping → CSV → DB)
+### Esecuzione giornaliera (scraping diretto nel DB)
 
 ```bash
-python -m scripts.run_scrape_and_sync \
-  --csv /Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.csv \
-  --db /Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.db \
-  --chunksize 3000
+python -m scripts.run_scrape_and_sync
 ```
+
+Oppure direttamente:
+
+```bash
+python main.py
+```
+
+Lo script `main.py` scrive direttamente nel database SQLite (`storage/jobs.db`).
 
 ### Consulta e aggiorna dal terminale
 
@@ -98,22 +95,12 @@ LISTSCRAPER_DB=/Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.db \
 ```
 Apri `http://127.0.0.1:8000/` per la pagina con paginazione/ordinamento e toggle viewed/applied/notes.
 
-### Solo sync CSV → DB (opzionale)
+## Esecuzione giornaliera automatica
+
+Lo script `run_scrape_and_sync` esegue lo scraping che aggiorna direttamente il database:
 
 ```bash
-python -m storage.sync_csv_to_sqlite \
-  --csv /Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.csv \
-  --db /Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.db \
-  --chunksize 3000
-```
-
-## Esecuzione giornaliera automatica (scraping + sync)
-
-Per separare scraping e consultazione, usa lo script che lancia scraping e poi sincronizza il DB:
-
-```bash
-python -m scripts.run_scrape_and_sync --csv /Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.csv \
-  --db /Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.db --chunksize 3000
+python -m scripts.run_scrape_and_sync
 ```
 
 ### macOS (launchd)
@@ -183,13 +170,13 @@ export PATH="/usr/local/bin:/usr/bin:/bin"
 # Cambia nella directory del progetto
 cd /Users/davidelandolfi/PyProjects/ListScraper
 
-# Esegui lo script principale
-caffeinate -s /Users/davidelandolfi/PyProjects/ListScraper/.venv/bin/python -m scripts.run_scrape_and_sync \
-  --csv /Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.csv \
-  --db /Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.db \
-  --chunksize 3000
+# Esegui lo script principale (scraping diretto nel DB)
+	caffeinate -s /Users/davidelandolfi/PyProjects/ListScraper/.venv/bin/python -m scripts.run_scrape_and_sync
 
 echo "Script completato: $(date)" >> /Users/davidelandolfi/PyProjects/ListScraper/storage/completion.log
 
 ```
 
+## TODO
+- Spostare i log nella cartella cron
+- Far funzionare la ricerca su altri paesi
