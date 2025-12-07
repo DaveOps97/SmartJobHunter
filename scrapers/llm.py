@@ -86,7 +86,7 @@ PROFILO PROFESSIONALE:
 - Esperienza: sviluppo software, Big Data, NLP, RAG
 - Linguaggi: Python, Java
 - Database: ArangoDB, MongoDB, PostgreSQL, Pinecone
-- Framework: Scrapy, Haystack, LangChain, Spring, REST APIs, Apache Spark (PySpark)
+- Framework: Scrapy, Haystack, LangChain, Spring, REST APIs, FastAPI, Apache Spark (PySpark)
 - Strumenti: Git, Docker, VSCode, Linux, macOS
 - Metodologie: Agile (Scrum), TDD, CI/CD
 - Competenze: Data Engineering, Web Scraping, Graph Data Modeling, Object-Oriented Programming
@@ -105,8 +105,8 @@ purché l'offerta di lavoro sia interessante; stesso discorso per altri paesi es
 CRITERI DI VALUTAZIONE:
 Assegna uno score 0-10 per ciascun criterio, dove i pesi indicano l'importanza relativa nel calcolo finale:
 
-1. score_competenze (peso 40% - CRITICO): allineamento con linguaggi, framework, metodologie e dominio del ruolo. Dai score 0 se il ruolo è senior o mid level.
-2. score_azienda (peso 25% - IMPORTANTE): reputazione, cultura collaborativa, innovazione, formazione, tecnologie moderne; preferenza per startup/aziende giovani e dinamiche
+1. score_competenze (peso 40% - CRITICO): allineamento con linguaggi, framework, metodologie e dominio del ruolo. Dai score 0 se il ruolo è senior o mid level
+2. score_azienda (peso 25% - IMPORTANTE): reputazione, cultura collaborativa, innovazione, formazione, tecnologie moderne; preferenza per PMI Consolidate e Scaleup
 3. score_stipendio (peso 15% - IMPORTANTE): competitività per profilo junior, benefit significativi, smart working, flessibilità
 4. score_località (peso 10% - MODERATO): corrispondenza con aree preferite o remote work/relocation accettabile
 5. score_crescita (peso 10% - MODERATO): mentorship, percorsi di crescita, formazione, progetti sfidanti
@@ -143,11 +143,10 @@ def _calculate_final_score(scores: Dict[str, int]) -> int:
 	# Pesi dei criteri
 	weights = {
 		"score_competenze": 0.40,  # 40% - CRITICO
-		"score_azienda": 0.20,     # 20% - IMPORTANTE
+		"score_azienda": 0.25,     # 25% - IMPORTANTE (include il 5% di score_coerenza)
 		"score_stipendio": 0.15,   # 15% - IMPORTANTE
 		"score_località": 0.10,    # 10% - MODERATO
 		"score_crescita": 0.10,     # 10% - MODERATO
-		"score_coerenza": 0.05,     # 5% - MINORE
 	}
 	
 	# Calcola la somma ponderata
@@ -212,7 +211,6 @@ def evaluate_job(row_data: Dict[str, Any], max_retries: int = 3, base_delay: flo
 			"score_stipendio": 0,
 			"score_località": 0,
 			"score_crescita": 0,
-			"score_coerenza": 0,
 			"score": 0,
 			"motivazione": "Nessuna descrizione disponibile",
 			"match_competenze": [],
@@ -273,7 +271,7 @@ DESCRIZIONE COMPLETA:
 			response_schema = genai_types.Schema(
 				type=genai_types.Type.OBJECT,
 				required=["score_competenze", "score_azienda", "score_stipendio", 
-						 "score_località", "score_crescita", "score_coerenza", 
+						 "score_località", "score_crescita", 
 						 "motivazione", "match_competenze"],
 				properties={
 					"score_competenze": genai_types.Schema(
@@ -297,11 +295,6 @@ DESCRIZIONE COMPLETA:
 						maximum=10,
 					),
 					"score_crescita": genai_types.Schema(
-						type=genai_types.Type.INTEGER,
-						minimum=0,
-						maximum=10,
-					),
-					"score_coerenza": genai_types.Schema(
 						type=genai_types.Type.INTEGER,
 						minimum=0,
 						maximum=10,
@@ -356,7 +349,6 @@ DESCRIZIONE COMPLETA:
 				"score_stipendio": int(parsed.get("score_stipendio", 0)),
 				"score_località": int(parsed.get("score_località", 0)),
 				"score_crescita": int(parsed.get("score_crescita", 0)),
-				"score_coerenza": int(parsed.get("score_coerenza", 0)),
 			}
 			
 			# Calcola lo score finale
@@ -369,7 +361,6 @@ DESCRIZIONE COMPLETA:
 				"score_stipendio": scores["score_stipendio"],
 				"score_località": scores["score_località"],
 				"score_crescita": scores["score_crescita"],
-				"score_coerenza": scores["score_coerenza"],
 				"score": final_score,
 				"motivazione": str(parsed.get("motivazione", "")),
 				"match_competenze": list(parsed.get("match_competenze", []) or []),
@@ -390,7 +381,6 @@ DESCRIZIONE COMPLETA:
 		"score_stipendio": 0,
 		"score_località": 0,
 		"score_crescita": 0,
-		"score_coerenza": 0,
 		"score": 0,
 		"motivazione": f"Errore valutazione: {type(last_err).__name__ if last_err else 'sconosciuto'}",
 		"match_competenze": [],
@@ -427,7 +417,6 @@ def enrich_dataframe_with_llm(df: pd.DataFrame) -> pd.DataFrame:
 		"llm_score_stipendio": [],
 		"llm_score_località": [],
 		"llm_score_crescita": [],
-		"llm_score_coerenza": [],
 		"llm_motivazione": [],
 		"llm_match_competenze": [],
 	}
@@ -462,7 +451,6 @@ def enrich_dataframe_with_llm(df: pd.DataFrame) -> pd.DataFrame:
 		new_cols["llm_score_stipendio"].append(int(res.get("score_stipendio", 0)))
 		new_cols["llm_score_località"].append(int(res.get("score_località", 0)))
 		new_cols["llm_score_crescita"].append(int(res.get("score_crescita", 0)))
-		new_cols["llm_score_coerenza"].append(int(res.get("score_coerenza", 0)))
 		new_cols["llm_motivazione"].append(str(res.get("motivazione", "")))
 		# serializza lista in JSON per storage nel database
 		new_cols["llm_match_competenze"].append(json.dumps(res.get("match_competenze", []), ensure_ascii=False))

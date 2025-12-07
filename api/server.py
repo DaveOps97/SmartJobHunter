@@ -132,6 +132,21 @@ def index() -> str:
       a:visited { color: #9d7cff; }
       .meta { color:#999; font-size:12px; }
       input[type="text"] { background-color: #3a3a3a; color: #e0e0e0; }
+            /* Animazione fade-out per rimozione riga */
+      @keyframes fadeOutRow {
+        from {
+          opacity: 1;
+          transform: translateX(0);
+        }
+        to {
+          opacity: 0;
+          transform: translateX(20px);
+        }
+      }
+      
+      .removing {
+        animation: fadeOutRow 0.4s ease-out forwards;
+      }
     </style>
   </head>
 <body>
@@ -156,7 +171,7 @@ def index() -> str:
   </header>
   <div class="meta" id="meta"></div>
   <table><thead><tr>
-    <th>score</th><th>title</th><th>company</th><th>location</th><th>date</th><th>scraping_date</th><th>url</th><th>motivazione</th><th>flag</th><th>note</th>
+    <th>score</th><th>title</th><th>company</th><th>location</th><th>date_posted</th><th>scraping_date</th><th>url</th><th>motivazione</th><th>flag</th><th>note</th>
   </tr></thead><tbody id="rows"></tbody></table>
   <div style="margin-top:12px; display:flex; gap:8px; align-items:center;"><button id="prev">Prev</button><span id="pageInfo" class="meta"></span><button id="next">Next</button></div>
   <script>
@@ -220,6 +235,8 @@ def index() -> str:
           sel.onchange = async function(e) {
             const id = this.getAttribute('data-id');
             const val = this.value;
+            const currentMode = mainFlagFilterEl.value;
+            const rowElement = this.closest('tr');
             
             const body = {
               viewed: val === 'viewed',
@@ -238,11 +255,33 @@ def index() -> str:
                 const errorText = await response.text();
                 console.error('Update failed:', errorText);
                 alert(`Errore durante l'aggiornamento: ${errorText}`);
-                load(); // Ricarica solo in caso di errore
+                load();
               } else {
-                // Successo: semplicemente logga, NON rimuovere la riga
                 console.log(`Flag aggiornato per job ${id}: ${val}`);
-                // La riga rimane visibile anche se non appartiene più al filtro corrente
+                
+                // Verifica se la riga non appartiene più al filtro corrente
+                const shouldRemove = (
+                  (currentMode === 'not_viewed' && val !== 'not_viewed') ||
+                  (currentMode === 'viewed' && val !== 'viewed') ||
+                  (currentMode === 'interested' && val !== 'interested') ||
+                  (currentMode === 'applied' && val !== 'applied')
+                );
+                
+                if (shouldRemove) {
+                  // Applica l'animazione di fade-out
+                  rowElement.classList.add('removing');
+                  
+                  // Rimuovi l'elemento dal DOM dopo l'animazione
+                  setTimeout(() => {
+                    rowElement.remove();
+                    
+                    // Se non ci sono più righe, ricarica
+                    const remainingRows = rowsEl.querySelectorAll('tr').length;
+                    if (remainingRows === 0) {
+                      load();
+                    }
+                  }, 400);
+                }
               }
             } catch (error) {
               console.error('Network error:', error);

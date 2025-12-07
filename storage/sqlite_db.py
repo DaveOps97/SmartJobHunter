@@ -35,7 +35,6 @@ KNOWN_INTEGER_COLUMNS = {
     "llm_score_stipendio",
     "llm_score_località",
     "llm_score_crescita",
-    "llm_score_coerenza",
 }
 KNOWN_BOOLEAN_COLUMNS = {
     "is_remote",
