@@ -95,4 +95,37 @@ def get_expected_columns(existing_df: pd.DataFrame = None, fallback_df: pd.DataF
         
     return expected_columns, schema_upgrade_required
 
+def combine_sources(*dataframes: pd.DataFrame, expected_columns: list[str]) -> pd.DataFrame:
+    """
+    Combina multiple fonti di job scraping in un unico DataFrame.
+    
+    Args:
+        *dataframes: Uno o più DataFrame da combinare
+        expected_columns: Lista delle colonne attese nello schema finale
+        
+    Returns:
+        DataFrame combinato e deduplicato, o DataFrame vuoto se nessuna fonte ha dati
+    """
+    frames = []
+    
+    for df in dataframes:
+        aligned_df = align_columns(df, expected_columns)
+        if not aligned_df.empty:
+            # Estrai il nome della fonte dalla colonna 'site' (usa il primo valore)
+            source_name = aligned_df['site'].iloc[0] if 'site' in aligned_df.columns else "Unknown"
+            frames.append(aligned_df)
+            print(f"{source_name}: {len(aligned_df)} job raccolti")
+    
+    if not frames:
+        print("⚠️  Nessun job raccolto dalle fonti configurate")
+        return pd.DataFrame(columns=expected_columns)
+    
+    all_sources = pd.concat(frames, ignore_index=True)
+    
+    # Deduplicazione (protezione race condition multithreading)
+    all_sources = all_sources.drop_duplicates(subset=['id'], keep='first')
+    
+    print(f"Totale raccolti: {len(all_sources)} job unici")
+    return all_sources
+
 

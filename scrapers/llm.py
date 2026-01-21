@@ -28,7 +28,7 @@ def initialize_api_key(api_key: str, is_free: bool):
 class RateLimiter:
 	"""Rate limiter per controllare il numero di richieste per minuto"""
 	
-	def __init__(self, max_requests_per_minute: int = 15):
+	def __init__(self, max_requests_per_minute: int = 25):
 		self.max_requests = max_requests_per_minute
 		self.requests = deque()
 		self.lock = Lock()
@@ -124,7 +124,7 @@ PROCESSO DI VALUTAZIONE:
 3. Nel campo motivazione, fornisci overview dell'offerta seguita da analisi bilanciata:
 	- **Punti Positivi (+):** lista elementi allineati a profilo/preferenze
 	- **Punti Negativi (-):** lista criticità, mancanze o disallineamenti
-	- **Analisi Punteggi:** riepiloga i singoli punteggi assegnati ai sei criteri, riportando un breve commento per ciascuno nel formato:
+	- **Analisi Punteggi:** riepiloga i singoli punteggi assegnati ai cinque criteri, riportando un breve commento per ciascuno nel formato:
 		- [Nome_criterio] (x/10): commento sintetico
 4. Nel campo match_competenze, elenca le competenze tecniche specifiche che matchano
 Rispondi in italiano, mantenendo i termini tecnici in inglese."""
@@ -143,7 +143,7 @@ def _calculate_final_score(scores: Dict[str, int]) -> int:
 	# Pesi dei criteri
 	weights = {
 		"score_competenze": 0.40,  # 40% - CRITICO
-		"score_azienda": 0.25,     # 25% - IMPORTANTE (include il 5% di score_coerenza)
+		"score_azienda": 0.25,     # 25% - IMPORTANTE
 		"score_stipendio": 0.15,   # 15% - IMPORTANTE
 		"score_località": 0.10,    # 10% - MODERATO
 		"score_crescita": 0.10,     # 10% - MODERATO
@@ -376,14 +376,14 @@ DESCRIZIONE COMPLETA:
 
 	# fallback robusto
 	return {
-		"score_competenze": 0,
-		"score_azienda": 0,
-		"score_stipendio": 0,
-		"score_località": 0,
-		"score_crescita": 0,
-		"score": 0,
-		"motivazione": f"Errore valutazione: {type(last_err).__name__ if last_err else 'sconosciuto'}",
-		"match_competenze": [],
+		"score_competenze": None,
+		"score_azienda": None,
+		"score_stipendio": None,
+		"score_località": None,
+		"score_crescita": None,
+		"score": None,
+		"motivazione": f"⚠️ Errore valutazione LLM: {type(last_err).__name__ if last_err else 'sconosciuto'}",
+		"match_competenze": None,
 	}
 
 
@@ -445,15 +445,21 @@ def enrich_dataframe_with_llm(df: pd.DataFrame) -> pd.DataFrame:
 
 	for idx, row in progress_bar:
 		res = evaluate_job(row.to_dict())
-		new_cols["llm_score"].append(int(res.get("score", 0)))
-		new_cols["llm_score_competenze"].append(int(res.get("score_competenze", 0)))
-		new_cols["llm_score_azienda"].append(int(res.get("score_azienda", 0)))
-		new_cols["llm_score_stipendio"].append(int(res.get("score_stipendio", 0)))
-		new_cols["llm_score_località"].append(int(res.get("score_località", 0)))
-		new_cols["llm_score_crescita"].append(int(res.get("score_crescita", 0)))
-		new_cols["llm_motivazione"].append(str(res.get("motivazione", "")))
-		# serializza lista in JSON per storage nel database
-		new_cols["llm_match_competenze"].append(json.dumps(res.get("match_competenze", []), ensure_ascii=False))
+		
+		# Gestisci None esplicitamente
+		new_cols["llm_score"].append(res.get("score"))  # Può essere None
+		new_cols["llm_score_competenze"].append(res.get("score_competenze"))
+		new_cols["llm_score_azienda"].append(res.get("score_azienda"))
+		new_cols["llm_score_stipendio"].append(res.get("score_stipendio"))
+		new_cols["llm_score_località"].append(res.get("score_località"))
+		new_cols["llm_score_crescita"].append(res.get("score_crescita"))
+		new_cols["llm_motivazione"].append(res.get("motivazione", ""))
+		# Per match_competenze: se None, salva None invece di JSON
+		match_comp = res.get("match_competenze")
+		new_cols["llm_match_competenze"].append(
+			json.dumps(match_comp, ensure_ascii=False) if match_comp is not None else None
+		)
+
 
 	# Chiudi la barra di progresso
 	progress_bar.close()

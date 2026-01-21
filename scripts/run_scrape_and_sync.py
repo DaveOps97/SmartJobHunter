@@ -1,5 +1,5 @@
 """
-Esegue scraping (main.py) che scrive direttamente nel database SQLite.
+Script di orchestrazione: esegue main.py (Scraping + Arricchimento LLM) e funzioni di maintenance.
 
 Uso manuale:
   python -m scripts.run_scrape_and_sync
@@ -113,7 +113,7 @@ def main() -> None:
     code = run_scraping()
     if code == 0:
         cleanup_stale_jobs(
-            db_path=os.getenv("LISTSCRAPER_DB_PATH"),
+            db_path=os.getenv("LISTSCRAPER_DB"),
             low_score_retention_days=int(os.getenv("LOW_SCORE_RETENTION_DAYS", "7")),
             absolute_retention_days=int(os.getenv("ABSOLUTE_RETENTION_DAYS", "30")),
             score_threshold=int(os.getenv("SCORE_THRESHOLD", "5"))

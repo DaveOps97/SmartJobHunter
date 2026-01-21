@@ -1,6 +1,6 @@
 """
 Modulo SQLite: schema, upsert diretto da DataFrame (chunked), query paginate/ordinate,
-e aggiornamento flag utente (viewed/interested/applied/notes).
+e aggiornamento flag utente (viewed/interested/applied/notes) + altre funzioni db-focused.
 
 Nota: pensato per DataFrame molto grandi (10k-20k+ righe, 38+ colonne) con memoria
 stabile grazie a chunking manuale.
@@ -51,23 +51,31 @@ USER_FLAG_COLUMNS = [
     "notes",
 ]
 
+# Path di default per il database SQLite
+DEFAULT_DB = "/Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.db"
+
+
+def get_db_path() -> str:
+    """Ottiene il percorso del database SQLite."""
+    return os.getenv("LISTSCRAPER_DB", DEFAULT_DB)
 
 @contextmanager
 def get_connection(db_path: str):
+    """Gestisce il ciclo di vita della connessione SQLite in modo sicuro e ottimizzato"""
     conn = sqlite3.connect(db_path)
     try:
         # Migliora performance su bulk insert
-        conn.execute("PRAGMA journal_mode=WAL;")
-        conn.execute("PRAGMA synchronous=NORMAL;")
-        conn.execute("PRAGMA temp_store=MEMORY;")
-        yield conn
-        conn.commit()
+        conn.execute("PRAGMA journal_mode=WAL;")   # Write-Ahead Logging: migliora concorrenza
+        conn.execute("PRAGMA synchronous=NORMAL;") # Bilanciamento sicurezza/velocità
+        conn.execute("PRAGMA temp_store=MEMORY;")  # Tabelle temporanee in RAM
+        yield conn      # Restituisce la connessione al chiamante
+        conn.commit()   # Commit automatico se nessun errore
     except sqlite3.Error as e:
-        conn.rollback()
+        conn.rollback() # Rollback automatico in caso di errore
         logger.error(f"SQLite error: {e}")
         raise
     finally:
-        conn.close()
+        conn.close()    # Chiusura garantita della connessione
 
 
 def _map_sql_type(column_name: str) -> str:
@@ -430,3 +438,95 @@ def set_job_flags(
         result = cur.execute(sql, params)
         if result.rowcount == 0:
             raise ValueError(f"Job con id '{job_id}' non trovato")
+
+def get_jobs_with_null_scores(db_path: str, batch_size: int = 100) -> pd.DataFrame:
+    """
+    Recupera dal database i job con llm_score NULL (non valutati).
+    
+    Args:
+        db_path: Percorso del database SQLite
+        batch_size: Numero massimo di job da recuperare
+        
+    Returns:
+        DataFrame con i job non valutati
+    """
+    with get_connection(db_path) as conn:
+        # Prende prima i job più recenti
+        query = """
+            SELECT * FROM jobs 
+            WHERE llm_score IS NULL 
+            ORDER BY scraping_date DESC
+            LIMIT ?
+        """
+        df = pd.read_sql_query(query, conn, params=(batch_size,))
+    
+    return df
+
+def get_jobs_to_enrich(jobs_df: pd.DataFrame, db_path: str = None) -> pd.DataFrame:
+    """
+    Identifica i job che necessitano arricchimento LLM, dati dalla combinazione di:
+    - Job nuovi (non presenti nel DB)
+    - Job esistenti con llm_score NULL (da riarricchire dopo errori precedenti)
+    
+    Args:
+        jobs_df: DataFrame con job appena scrapati
+        db_path: Percorso del database (opzionale, usa default se None)
+        
+    Returns:
+        DataFrame con job da processare con LLM 
+        
+    Raises:
+        ValueError: Se jobs_df non contiene la colonna 'id'
+    """
+    if 'id' not in jobs_df.columns:
+        raise ValueError("DataFrame deve contenere la colonna 'id'")
+    
+    if db_path is None:
+        db_path = get_db_path()
+    
+    # Step 1: Identifica job nuovi vs esistenti
+    job_ids = jobs_df['id'].astype(str).tolist()
+    existing_job_ids = get_existing_job_ids(db_path, job_ids)
+    
+    new_jobs_mask = ~jobs_df['id'].astype(str).isin(existing_job_ids)
+    new_jobs_df = jobs_df[new_jobs_mask].copy()
+    
+    print(f"\n=== IDENTIFICAZIONE JOB NUOVI VS ESISTENTI ===")
+    print(f"Job nuovi (non nel DB): {len(new_jobs_df)}")
+    print(f"Job già presenti nel DB: {len(existing_job_ids)}")
+    
+    # job esistenti con score NULL dal DB
+    existing_null = pd.DataFrame()
+    
+    if existing_job_ids:
+        with get_connection(db_path) as conn:
+            placeholders = ','.join(['?'] * len(existing_job_ids))
+            query = f"""
+                SELECT * FROM jobs 
+                WHERE id IN ({placeholders})
+                AND llm_score IS NULL
+            """
+            existing_null = pd.read_sql_query(
+                query, conn, params=list(existing_job_ids)
+            )
+        
+        print(f"  - Con llm_score NULL (da riarricchire): {len(existing_null)}")
+        print(f"  - Con llm_score valido (skip): {len(existing_job_ids) - len(existing_null)}")
+    
+    # Step 3: Combina job da arricchire
+    jobs_to_enrich_list = []
+    
+    if not new_jobs_df.empty:
+        jobs_to_enrich_list.append(new_jobs_df)
+    
+    if not existing_null.empty:
+        jobs_to_enrich_list.append(existing_null)
+    
+    if jobs_to_enrich_list:
+        jobs_to_enrich = pd.concat(jobs_to_enrich_list, ignore_index=True)
+        print(f"\n=== TOTALE DA ARRICCHIRE CON LLM: {len(jobs_to_enrich)} ===")
+    else:
+        jobs_to_enrich = pd.DataFrame()
+        print(f"\n=== NESSUN JOB DA ARRICCHIRE ===")
+    
+    return jobs_to_enrich
