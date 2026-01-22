@@ -41,7 +41,7 @@ ListScraper/
 │
 └── cron/                  # Configurazione schedulazione automatica (macOS)
     ├── cron_ls.sh        # Script bash per esecuzione schedulata
-    └── com.davidelandolfi.listscraper.plist # Configurazione launchd
+    └── com.listscraper.job.plist # Configurazione launchd
 ```
 
 ## 🚀 Setup
@@ -167,19 +167,19 @@ Il progetto include configurazione per esecuzione automatica giornaliera tramite
 
 1. **Copia il file plist** nella directory LaunchAgents:
 ```bash
-cp cron/com.davidelandolfi.listscraper.plist ~/Library/LaunchAgents/
+cp cron/com.listscraper.job.plist ~/Library/LaunchAgents/
 ```
 
-2. **Modifica il percorso dello script** nel plist se necessario (attualmente configurato per `/Users/davidelandolfi/PyProjects/ListScraper/`)
+2. **Modifica il percorso dello script** nel plist sostituendo `/path/to/ListScraper` con il percorso assoluto della directory del progetto
 
 3. **Carica il job**:
 ```bash
-launchctl load ~/Library/LaunchAgents/com.davidelandolfi.listscraper.plist
+launchctl load ~/Library/LaunchAgents/com.listscraper.job.plist
 ```
 
 4. **Avvia manualmente** (opzionale, per test):
 ```bash
-launchctl start com.davidelandolfi.listscraper
+launchctl start com.listscraper.job
 ```
 
 ### Configurazione

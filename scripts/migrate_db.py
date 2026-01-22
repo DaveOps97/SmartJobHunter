@@ -5,7 +5,9 @@ Script utile per aggiungere nuove colonne nel db
 import sqlite3
 import os
 
-DB_PATH = "/Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.db"
+# Percorso relativo alla root del progetto
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH = os.path.join(PROJECT_ROOT, "storage", "jobs.db")
 
 def migrate():
     if not os.path.exists(DB_PATH):

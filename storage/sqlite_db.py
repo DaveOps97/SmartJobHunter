@@ -51,8 +51,8 @@ USER_FLAG_COLUMNS = [
     "notes",
 ]
 
-# Path di default per il database SQLite
-DEFAULT_DB = "/Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.db"
+# Path di default per il database SQLite (percorso relativo alla root del progetto)
+DEFAULT_DB = os.path.join(os.path.dirname(os.path.dirname(__file__)), "storage", "jobs.db")
 
 
 def get_db_path() -> str:

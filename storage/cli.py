@@ -3,7 +3,7 @@ CLI per consultare offerte (paginazione/ordinamento) e segnare viewed/applied/no
 
 Esempi:
   # Lista prima pagina ordinata per score decrescente (default)
-  python -m storage.cli list --db /Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.db \
+  python -m storage.cli list --db storage/jobs.db \
       --page 1 --page-size 50 --order-by llm_score --order-dir desc
 
   # Mostra solo non visionati

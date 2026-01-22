@@ -7,7 +7,7 @@ Endpoint principali:
 - POST /jobs/{job_id}/flags  (aggiorna viewed/interested/applied/notes)
 
 Configurazione DB:
-- Env var LISTSCRAPER_DB (default: /Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.db)
+- Env var LISTSCRAPER_DB (default: percorso relativo storage/jobs.db)
 
 Esecuzione:
   uvicorn api.server:app --host 127.0.0.1 --port 8000
@@ -25,7 +25,8 @@ from pydantic import BaseModel, Field
 from storage.sqlite_db import query_jobs, set_job_flags
 
 
-DEFAULT_DB = "/Users/davidelandolfi/PyProjects/ListScraper/storage/jobs.db"
+# Percorso relativo alla root del progetto
+DEFAULT_DB = os.path.join(os.path.dirname(os.path.dirname(__file__)), "storage", "jobs.db")
 
 
 def get_db_path() -> str:

@@ -3,12 +3,12 @@
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>com.davidelandolfi.listscraper</string>
+    <string>com.listscraper.job</string>
 
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/davidelandolfi/PyProjects/ListScraper/cron/cron_ls.sh</string>
+        <string>/path/to/ListScraper/cron/cron_ls.sh</string>
     </array>
 
     <!-- Esecuzione giornaliera alle 10:00 -->
@@ -37,14 +37,15 @@
     <integer>23400</integer>
 
     <!-- Log persistenti nella directory del progetto -->
+    <!-- NOTA: Sostituisci /path/to/ListScraper con il percorso assoluto della directory del progetto -->
     <key>StandardOutPath</key>
-    <string>/Users/davidelandolfi/PyProjects/ListScraper/storage/launchd.stdout.log</string>
+    <string>/path/to/ListScraper/storage/launchd.stdout.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/davidelandolfi/PyProjects/ListScraper/storage/launchd.stderr.log</string>
+    <string>/path/to/ListScraper/storage/launchd.stderr.log</string>
 
     <key>WorkingDirectory</key>
-    <string>/Users/davidelandolfi/PyProjects/ListScraper</string>
+    <string>/path/to/ListScraper</string>
 
     <!-- Tipo di processo per gestione risorse ottimale -->
     <key>ProcessType</key>
