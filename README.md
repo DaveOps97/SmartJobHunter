@@ -1,10 +1,10 @@
-# ListScraper
+# SmartJobHunter
 
-**ListScraper** è un job scraper intelligente che raccoglie automaticamente offerte di lavoro da piattaforme come LinkedIn, Indeed, Glassdoor e HiringCafe, analizzandole tramite un Large Language Model (LLM) per identificare quelle più rilevanti in base alle preferenze e competenze dell'utente.
+**SmartJobHunter** è un job scraper intelligente che raccoglie automaticamente offerte di lavoro da piattaforme come LinkedIn, Indeed, Glassdoor e HiringCafe, analizzandole tramite un Large Language Model (LLM) per identificare quelle più rilevanti in base alle preferenze e competenze dell'utente.
 
 ## 📋 Descrizione del Progetto
 
-ListScraper automatizza il processo di ricerca del lavoro attraverso un sistema in due fasi:
+SmartJobHunter automatizza il processo di ricerca del lavoro attraverso un sistema in due fasi:
 
 1. **Scraping**: Il sistema esegue web scraping su diverse piattaforme di recruitment usando la libreria JobSpy e API dedicate, raccogliendo dati strutturati sulle offerte di lavoro disponibili. Le informazioni estratte includono titolo della posizione, azienda, località, descrizione del lavoro e altri dettagli rilevanti.
 
