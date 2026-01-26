@@ -12,6 +12,14 @@ SmartJobHunter automatizza il processo di ricerca del lavoro attraverso un siste
 
 Il progetto utilizza un'**architettura DB-first**: lo scraping scrive direttamente nel database SQLite con upsert incrementale, paginazione e flag utente (visionato/interessato/applicato).
 
+## 🛠️ Tecnologie Utilizzate
+
+- **[python-jobspy](https://github.com/Bunsly/JobSpy)**: Libreria Python per scraping job posting da LinkedIn, Indeed e Glassdoor con API unificate
+- **SQLite**: Database relazionale embedded per storage persistente delle offerte con schema ottimizzato per query e paginazione
+- **[FastAPI](https://fastapi.tiangolo.com/)**: Framework web moderno e performante per l'API REST e servizio del frontend HTML
+- **[Uvicorn](https://www.uvicorn.org/)**: Server ASGI ad alte prestazioni per esecuzione applicazioni FastAPI
+- **[Google Gemini (genai)](https://ai.google.dev/)**: Large Language Model (Gemini Flash Lite) per arricchimento intelligente e scoring delle offerte
+
 ## 📁 Struttura del Progetto
 
 ```
