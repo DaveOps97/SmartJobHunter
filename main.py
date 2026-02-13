@@ -7,13 +7,14 @@ from datetime import datetime
 from pathlib import Path
 from scrapers import scrape_all_locations, fetch_hiring_cafe_dataframe
 from scrapers.utils import get_expected_columns, combine_sources
-from scrapers.llm import initialize_api_key, enrich_dataframe_with_llm
+from scrapers.llm import initialize_api_keys, enrich_dataframe_with_llm
 from storage.sqlite_db import get_db_path, get_jobs_to_enrich, upsert_jobs, get_connection
 
 
 def load_env_from_root():
-    """Carica variabili d'ambiente dal file .env nella root del progetto"""
+    """Carica variabili d'ambiente dal .env"""
     import os
+    from scrapers.llm import initialize_api_keys
     
     project_root = Path(__file__).parent
     env_file = project_root / ".env"
@@ -26,32 +27,41 @@ def load_env_from_root():
                     key, value = line.split('=', 1)
                     os.environ[key.strip()] = value.strip()
     
-    api_key = os.getenv("FREE_GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
-    is_free_api_key = bool(os.getenv("FREE_GEMINI_API_KEY"))
+    # Carica multiple keys
+    api_keys = []
+    for i in range(1, 11):  # Supporta fino a 10 progetti
+        key = os.getenv(f"GEMINI_API_KEY_{i}")
+        if key:
+            api_keys.append(key)
     
-    if not api_key:
-        raise RuntimeError("API key mancante: imposta FREE_GEMINI_API_KEY o GEMINI_API_KEY")
+    # Fallback su key singola (compatibilità)
+    if not api_keys:
+        single = os.getenv("FREE_GEMINI_API_KEY") or os.getenv("GEMINI_API_KEY")
+        if single:
+            api_keys = [single]
     
-    if is_free_api_key:
-        print("🔑 Utilizzo FREE_GEMINI_API_KEY (rate limiting: 15 req/min)")
-    else:
-        print("🔑 Utilizzo GEMINI_API_KEY (nessun rate limiting)")
+    if not api_keys:
+        raise RuntimeError("Nessuna API key trovata nel .env")
     
-    initialize_api_key(api_key, is_free_api_key)
+    is_free = len(api_keys) > 1 or bool(os.getenv("FREE_GEMINI_API_KEY"))
+    
+    print(f"🔑 Progetti configurati: {len(api_keys)}")
+    initialize_api_keys(api_keys, is_free)
 
 
 # Lista delle città italiane da cercare
 locations = [
         "Milano, Lombardia",      # Hub tech principale (70% job tech Italia)
-        "Torino, Piemonte",       # Automotive, fintech, AI
-        "Bologna, Emilia-Romagna", # Tech hub emergente, pharma-tech
-        "Firenze, Toscana",       # Scale-up, turismo tech
-        "Verona, Veneto",         # Logistica, manufacturing tech
-        "Genova, Liguria",        # Porto, shipping tech
-        "Brescia, Lombardia",     # Manufacturing, industria 4.0
-        "Venezia, Veneto",        # Turismo tech, port tech
+        # "Torino, Piemonte",       # Automotive, fintech, AI
+        # "Bologna, Emilia-Romagna", # Tech hub emergente, pharma-tech
+        # "Firenze, Toscana",       # Scale-up, turismo tech
+        # "Verona, Veneto",         # Logistica, manufacturing tech
+        # "Genova, Liguria",        # Porto, shipping tech
+        # "Brescia, Lombardia",     # Manufacturing, industria 4.0
+        # "Venezia, Veneto",        # Turismo tech, port tech
         "Padova, Veneto",         # Healthcare tech, università
-        "Parma, Emilia-Romagna",  # Food tech, automotive
+        # "Parma, Emilia-Romagna",  # Food tech, automotive
+        "Foligno, Umbria", 
         "Perugia, Umbria",
         "Roma, Lazio",            #
         "Napoli, Campania",        #
@@ -84,7 +94,7 @@ def main():
     jobspy_df = scrape_all_locations(
         locations=locations,
         search_term=jobspy_search_term,
-        hours_old=26,
+        hours_old=40,
         results_wanted=60
     ) # hours_old:results_wanted -> 26:60, 60:120, 128:150
     

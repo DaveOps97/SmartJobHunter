@@ -4,7 +4,7 @@ import os
 import time
 import json
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 from collections import deque
 from threading import Lock
 
@@ -13,67 +13,157 @@ from tqdm import tqdm
 from google import genai
 from google.genai import types as genai_types
 
-# Variabili globali per l'API key
-GEMINI_API_KEY = None
+
+
+class PerKeyRateLimiter:
+    """Rate limiter che traccia separatamente ogni API key"""
+    
+    def __init__(self, max_requests_per_minute: int = 10):
+        """
+        Args:
+            max_requests_per_minute: Limite RPM per singola key (10 per free tier)
+        """
+        self.max_requests = max_requests_per_minute
+        self.key_requests: Dict[str, deque] = {}  # key -> deque di timestamps
+        self.lock = Lock()
+    
+    def wait_if_needed(self, api_key: str):
+        """
+        Controlla e rispetta il rate limit per questa specifica API key
+        
+        Args:
+            api_key: La chiave API da controllare
+        """
+        with self.lock:
+            # Inizializza deque per questa key se non esiste
+            if api_key not in self.key_requests:
+                self.key_requests[api_key] = deque()
+            
+            requests = self.key_requests[api_key]
+            now = time.time()
+            
+            # Rimuovi richieste più vecchie di 1 minuto PER QUESTA KEY
+            while requests and now - requests[0] > 60:
+                requests.popleft()
+            
+            # Se questa key ha raggiunto il limite, aspetta
+            if len(requests) >= self.max_requests:
+                oldest_request = requests[0]
+                wait_time = 60 - (now - oldest_request) + 0.1
+                if wait_time > 0:
+                    key_suffix = api_key[-6:] if len(api_key) > 6 else api_key
+                    print(f"⏳ Rate limit per key ...{key_suffix}: attesa {wait_time:.1f}s")
+                    time.sleep(wait_time)
+                    now = time.time()
+                    # Pulisci di nuovo dopo l'attesa
+                    while requests and now - requests[0] > 60:
+                        requests.popleft()
+            
+            # Registra questa richiesta per questa key
+            requests.append(now)
+    
+    def get_stats(self) -> Dict[str, Dict[str, int]]:
+        """Restituisce statistiche per ogni key"""
+        with self.lock:
+            stats = {}
+            now = time.time()
+            for api_key, requests in self.key_requests.items():
+                key_suffix = api_key[-6:] if len(api_key) > 6 else api_key
+                # Conta richieste nell'ultimo minuto
+                recent = sum(1 for ts in requests if now - ts <= 60)
+                stats[f"...{key_suffix}"] = {
+                    "last_minute": recent,
+                    "total": len(requests)
+                }
+            return stats
+
+
+class MultiProjectManager:
+    """Gestisce rotazione tra progetti con rate limiting per-key integrato"""
+    
+    def __init__(self, api_keys: List[str], max_rpm_per_key: int = 10):
+        """
+        Args:
+            api_keys: Lista di API keys da progetti diversi
+            max_rpm_per_key: Rate limit RPM per singola key (default 10 per free tier)
+        """
+        if not api_keys:
+            raise ValueError("Almeno una API key richiesta")
+        
+        self.api_keys = deque(api_keys)
+        self.lock = Lock()
+        self.usage_stats = {key: 0 for key in api_keys}
+        
+        # Rate limiter per-key integrato
+        self.rate_limiter = PerKeyRateLimiter(max_requests_per_minute=max_rpm_per_key)
+    
+    def get_next_key_with_rate_limit(self) -> str:
+        """
+        Ottiene la prossima key con round-robin E applica rate limiting
+        
+        Returns:
+            API key pronta all'uso (già controllata per rate limit)
+        """
+        # Round-robin: ottieni la prossima key
+        with self.lock:
+            self.api_keys.rotate(-1)
+            current_key = self.api_keys[0]
+            self.usage_stats[current_key] += 1
+        
+        # Applica rate limiting per questa specifica key (fuori dal lock)
+        self.rate_limiter.wait_if_needed(current_key)
+        
+        return current_key
+    
+    def get_stats(self) -> dict:
+        """Statistiche complete di utilizzo"""
+        with self.lock:
+            distribution = {
+                f"...{k[-6:]}": count 
+                for k, count in self.usage_stats.items()
+            }
+            total = sum(self.usage_stats.values())
+        
+        rate_stats = self.rate_limiter.get_stats()
+        
+        return {
+            "total_requests": total,
+            "distribution": distribution,
+            "num_projects": len(self.api_keys),
+            "rate_limits": rate_stats
+        }
+
+# Variabili globali
+GEMINI_API_KEYS: List[str] = []
 IS_FREE_API_KEY = False
+_project_manager: Optional[MultiProjectManager] = None
 
 
-def initialize_api_key(api_key: str, is_free: bool):
-    """Inizializza le variabili globali dell'API key"""
-    global GEMINI_API_KEY, IS_FREE_API_KEY
-    GEMINI_API_KEY = api_key
+def initialize_api_keys(api_keys: List[str], is_free: bool):
+    """Inizializza il multi-project manager con rate limiting per-key"""
+    global GEMINI_API_KEYS, IS_FREE_API_KEY, _project_manager
+    
+    GEMINI_API_KEYS = api_keys
     IS_FREE_API_KEY = is_free
-
-
-class RateLimiter:
-	"""Rate limiter per controllare il numero di richieste per minuto"""
-	
-	def __init__(self, max_requests_per_minute: int = 25):
-		self.max_requests = max_requests_per_minute
-		self.requests = deque()
-		self.lock = Lock()
-	
-	def wait_if_needed(self):
-		"""Aspetta se necessario per rispettare il limite di richieste per minuto"""
-		with self.lock:
-			now = time.time()
-			
-			# Rimuovi richieste più vecchie di 1 minuto
-			while self.requests and now - self.requests[0] > 60:
-				self.requests.popleft()
-			
-			# Se abbiamo raggiunto il limite, aspetta
-			if len(self.requests) >= self.max_requests:
-				oldest_request = self.requests[0]
-				wait_time = 60 - (now - oldest_request) + 0.1  # +0.1 per sicurezza
-				if wait_time > 0:
-					time.sleep(wait_time)
-					# Aggiorna il timestamp dopo l'attesa
-					now = time.time()
-					# Rimuovi di nuovo le richieste vecchie
-					while self.requests and now - self.requests[0] > 60:
-						self.requests.popleft()
-			
-			# Registra questa richiesta
-			self.requests.append(now)
-
-
-# Istanza globale del rate limiter
-_rate_limiter = None
-
-
-def _get_rate_limiter() -> Optional[RateLimiter]:
-	"""Ottiene il rate limiter appropriato basato sulla variabile globale"""
-	global _rate_limiter
-	
-	if _rate_limiter is None:
-		# Usa le variabili globali dal main invece di caricare ogni volta
-		if IS_FREE_API_KEY:
-			_rate_limiter = RateLimiter(max_requests_per_minute=15)
-		else:
-			_rate_limiter = None  # Nessun rate limiting
-	
-	return _rate_limiter
+    
+    if len(api_keys) > 1:
+        # Multi-project: rate limit 10 RPM per key
+        _project_manager = MultiProjectManager(
+            api_keys,
+            max_rpm_per_key=10
+        )
+        print(f"✅ Multi-project rotation: {len(api_keys)} progetti")
+        print(f"📊 Rate limit: 10 RPM per progetto")
+        print(f"🚀 Throughput max: {len(api_keys) * 10} RPM totali")
+    elif len(api_keys) == 1:
+        # Singolo progetto: rate limit 15 RPM (più conservativo)
+        _project_manager = MultiProjectManager(
+            api_keys,
+            max_rpm_per_key=15
+        )
+        print("⚠️  Singolo progetto - rate limit 15 RPM")
+    else:
+        raise ValueError("Nessuna API key fornita")
 
 
 SYSTEM_INSTRUCTIONS = """PERSONA: Sei un esperto di selezione del personale che valuta offerte di lavoro in relazione al mio profilo professionale.
@@ -161,12 +251,22 @@ def _calculate_final_score(scores: Dict[str, int]) -> int:
 
 
 def _get_client() -> Any:
-	# Usa la variabile globale invece di caricare ogni volta
-	if not GEMINI_API_KEY:
-		raise RuntimeError("API key mancante: imposta la variabile d'ambiente FREE_GEMINI_API_KEY o GEMINI_API_KEY")
-	if genai is None:
-		raise RuntimeError("google-genai non installato. Aggiungi la dipendenza google-genai.")
-	return genai.Client(api_key=GEMINI_API_KEY)
+    """
+    Ottiene client Gemini con key rotation E rate limiting automatici
+    
+    Returns:
+        Client Gemini configurato con la key corretta
+    """
+    if not _project_manager:
+        raise RuntimeError("Project manager non inizializzato")
+    
+    if genai is None:
+        raise RuntimeError("google-genai non installato")
+    
+    # Ottieni la prossima key CON rate limiting già applicato
+    current_key = _project_manager.get_next_key_with_rate_limit()
+    
+    return genai.Client(api_key=current_key)
 
 
 def evaluate_job(row_data: Dict[str, Any], max_retries: int = 3, base_delay: float = 1.5) -> Dict[str, Any]:
@@ -256,13 +356,9 @@ DESCRIZIONE COMPLETA:
 		"Rispondi esclusivamente con JSON valido senza testo extra.\n\n" 
 		+ structured_data
 	)
-
-	client = _get_client()
 	
-	# Applica rate limiting se necessario
-	rate_limiter = _get_rate_limiter()
-	if rate_limiter:
-		rate_limiter.wait_if_needed()
+	# _get_client() ora gestisce key rotation e rate limiting per-key
+	client = _get_client()
 
 	last_err: Optional[Exception] = None
 	for attempt in range(1, max_retries + 1):
@@ -367,12 +463,21 @@ DESCRIZIONE COMPLETA:
 			}
 			return result
 			
-		except Exception as e:  # rete, rate limit, parsing
+		except Exception as e:
+			# Salva l'errore per il fallback finale
 			last_err = e
+			# Log dettagliato dell'eccezione
+			err_type = type(e).__name__
+			status = getattr(e, "status_code", None)
+			print(f"⚠️ Errore LLM al tentativo {attempt}/{max_retries}: {err_type}: {e}")
+			if status is not None:
+				print(f"   HTTP status: {status}")
+			# Backoff semplice tra i retry
 			time.sleep(base_delay * attempt)
-			# Applica rate limiting anche nei retry
-			if rate_limiter:
-				rate_limiter.wait_if_needed()
+			
+			# Nel retry, ottieni un NUOVO client (con rate limiting per-key)
+			client = _get_client()
+
 
 	# fallback robusto
 	return {
@@ -437,9 +542,8 @@ def enrich_dataframe_with_llm(df: pd.DataFrame) -> pd.DataFrame:
 		total=total_rows,
 		ncols=100,
 		desc="Elaborazione LLM",
-		unit="offerta",
-		miniters=50,  # Aggiorna ogni 50 iterazioni
-		#mininterval=1.0,  # Aggiorna almeno ogni secondo
+		unit="job",
+		miniters=10,
 		bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}<{remaining}, {rate_fmt}]"
 	)
 
