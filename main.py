@@ -121,7 +121,7 @@ def main():
     
     # === Arricchimento LLM ===
     print(f"\nProcessando {len(jobs_to_enrich)} job con LLM...")
-    enriched_jobs = enrich_dataframe_with_llm(jobs_to_enrich)
+    enriched_jobs = enrich_dataframe_with_llm(jobs_to_enrich, batch_size=5)
     
     # === Salvataggio ===
     print(f"\n=== SALVATAGGIO NEL DATABASE ===")
