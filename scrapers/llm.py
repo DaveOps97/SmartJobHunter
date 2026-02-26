@@ -2,6 +2,7 @@ from __future__ import annotations
 
 
 import os
+import re
 import time
 import json
 from pathlib import Path
@@ -94,10 +95,16 @@ class MultiProjectManager:
         if not api_keys:
             raise ValueError("Almeno una API key richiesta")
         
+        # Deque usata solo per il round-robin semplice sulle key (batch)
         self.api_keys = deque(api_keys)
+        # Lista ordinata e immutabile usata per la sequenza key×model (singolo job)
+        self._api_keys_list: List[str] = list(api_keys)
+        # Contatore piatto di slot key×model
+        self._slot_index: int = 0
+
         self.lock = Lock()
         self.usage_stats = {key: 0 for key in api_keys}
-        
+
         # Rate limiter per-key integrato
         self.rate_limiter = PerKeyRateLimiter(max_requests_per_minute=max_rpm_per_key)
     
@@ -118,6 +125,32 @@ class MultiProjectManager:
         self.rate_limiter.wait_if_needed(current_key)
         
         return current_key
+
+    def get_next_key_and_model(self) -> tuple[str, str]:
+        """
+        Ottiene la prossima API key e il relativo modello da usare,
+        alternando i modelli separatamente per ogni chiave.
+        """
+        with self.lock:
+            num_models = len(SINGLE_EVAL_MODELS)
+            total_slots = len(self._api_keys_list) * num_models
+            if total_slots <= 0:
+                raise RuntimeError("Nessuna combinazione key×modello disponibile")
+
+            # Sequenza lineare su griglia key×model
+            idx = self._slot_index % total_slots
+            key_idx = idx // num_models
+            model_idx = idx % num_models
+            self._slot_index += 1
+
+            current_key = self._api_keys_list[key_idx]
+            current_model = SINGLE_EVAL_MODELS[model_idx]
+            self.usage_stats[current_key] += 1
+
+        # Applica il rate limit sulla singola chiave fuori dal lock
+        self.rate_limiter.wait_if_needed(current_key)
+
+        return current_key, current_model
     
     def get_stats(self) -> dict:
         """Statistiche complete di utilizzo"""
@@ -133,7 +166,7 @@ class MultiProjectManager:
         return {
             "total_requests": total,
             "distribution": distribution,
-            "num_projects": len(self.api_keys),
+            "num_projects": len(self._api_keys_list),
             "rate_limits": rate_stats
         }
 
@@ -142,6 +175,25 @@ class MultiProjectManager:
 GEMINI_API_KEYS: List[str] = []
 IS_FREE_API_KEY = False
 _project_manager: Optional[MultiProjectManager] = None
+
+# Modelli usati nella valutazione singola (per il calcolo degli slot RPD)
+# Ordine importante: indice 0 → modello "lite"
+SINGLE_EVAL_MODELS: List[str] = ["gemini-2.5-flash-lite", "gemini-2.5-flash"]
+
+# Stato globale per gestione esaurimento quota RPD (per-day)
+_rpd_exhausted_count: int = 0
+_rpd_exhausted_lock: Lock = Lock()
+
+FALLBACK_RESULT_RPD = {
+    "score_competenze": None,
+    "score_azienda": None,
+    "score_stipendio": None,
+    "score_località": None,
+    "score_crescita": None,
+    "score": None,
+    "motivazione": "Quota RPD giornaliera esaurita per tutte le API key e modelli disponibili.",
+    "match_competenze": None,
+}
 
 
 
@@ -207,7 +259,7 @@ CRITERI DI VALUTAZIONE:
 Assegna uno score 0-10 per ciascun criterio, dove i pesi indicano l'importanza relativa nel calcolo finale:
 
 
-1. score_competenze (peso 40% - CRITICO): allineamento con linguaggi, framework, metodologie e dominio del ruolo. Dai score 0 se il ruolo è senior o mid level
+1. score_competenze (peso 40% - CRITICO): allineamento con linguaggi, framework, metodologie e dominio del ruolo. IMPORTANTE: Se il ruolo è senior o mid level, dillo in modo esplicito e assegna score 0.
 2. score_azienda (peso 25% - IMPORTANTE): reputazione, cultura collaborativa, innovazione, formazione, tecnologie moderne; preferenza per PMI Consolidate e Scaleup
 3. score_stipendio (peso 15% - IMPORTANTE): competitività per profilo junior, benefit significativi, smart working, flessibilità
 4. score_località (peso 10% - MODERATO): corrispondenza con aree preferite o remote work/relocation accettabile
@@ -233,6 +285,33 @@ PROCESSO DI VALUTAZIONE:
 4. Nel campo match_competenze, elenca le competenze tecniche specifiche che matchano
 Rispondi in italiano, mantenendo i termini tecnici in inglese."""
 
+
+
+def _enforce_competenze_zero_for_senior(
+    scores: Dict[str, int],
+    motivazione: Optional[str] = None,
+) -> None:
+    """
+    Applica il vincolo di progetto:
+    se nella motivazione viene indicato che il ruolo è mid/senior, forza score_competenze a 0.
+    Modifica il dict scores in-place.
+    """
+    try:
+        if not isinstance(motivazione, str) or not motivazione.strip():
+            return
+
+        m = motivazione.lower()
+        patterns = (
+            r"\bsenior\b",
+            r"\bsr\.?\b",
+            r"\bmid[\s-]?level\b",
+            r"\bmidlevel\b",
+        )
+        if any(re.search(p, m) for p in patterns):
+            scores["score_competenze"] = 0
+    except Exception:
+        # In caso di problemi con i dati, non bloccare il flusso
+        pass
 
 
 def _calculate_final_score(scores: Dict[str, int]) -> int:
@@ -409,7 +488,7 @@ def evaluate_jobs_batch(jobs_data: List[Dict[str, Any]], max_retries: int = 3, b
     
     # MODIFICA: Prompt più esplicito sul formato
     prompt = (
-        f"Valuta attentamente le seguenti {len(valid_jobs)} offerte di lavoro in base alle istruzioni di sistema. "
+        f"Valuta attentamente ed in modo indipendente tra loro le seguenti {len(valid_jobs)} offerte di lavoro in base alle istruzioni di sistema. "
         f"Le offerte sono separate da una linea di uguale (=). "
         f"Rispondi con un JSON array contenente esattamente {len(valid_jobs)} oggetti valutazione, "
         "uno per ogni offerta, nello stesso ordine in cui appaiono. "
@@ -485,20 +564,39 @@ def evaluate_jobs_batch(jobs_data: List[Dict[str, Any]], max_retries: int = 3, b
                     accum.append(chunk.text)
             
             text = ("".join(accum)).strip()
+            
+            # Risposta vuota: possibile safety block, timeout o modello che non restituisce testo
+            if not text:
+                raise ValueError(
+                    "Risposta API vuota (possibile safety block, timeout o contenuto filtrato)"
+                )
+            
             json_str = _extract_json(text)
             parsed = json.loads(json_str)
-            
             evaluations = parsed.get("evaluations", [])
             
             # Verifica che il numero di valutazioni corrisponda
             if len(evaluations) != len(valid_jobs):
-                raise ValueError(
-                    f"Mismatch valutazioni: attese {len(valid_jobs)}, ricevute {len(evaluations)}"
+                # Diagnostica: aiuta a capire se è risposta vuota, JSON sbagliato o struttura diversa
+                msg = (
+                    f"Mismatch valutazioni: attese {len(valid_jobs)}, ricevute {len(evaluations)}. "
+                    f"Chiavi nel JSON: {list(parsed.keys())}. "
                 )
+                if text:
+                    preview = text[:400] + "..." if len(text) > 400 else text
+                    msg += f"Anteprima risposta ({len(text)} chars): {preview!r}"
+                else:
+                    msg += "Risposta API vuota."
+                raise ValueError(msg)
             
             # Processa risultati
             results = []
             for eval_data in evaluations:
+                # Usa job_id per recuperare l'offerta originale e applicare le regole di progetto
+                job_id = int(eval_data.get("job_id", 0) or 0)
+                job_idx = job_id - 1  # job_id è 1-based
+                row_data = valid_jobs[job_idx] if 0 <= job_idx < len(valid_jobs) else {}
+
                 scores = {
                     "score_competenze": int(eval_data.get("score_competenze", 0)),
                     "score_azienda": int(eval_data.get("score_azienda", 0)),
@@ -506,11 +604,15 @@ def evaluate_jobs_batch(jobs_data: List[Dict[str, Any]], max_retries: int = 3, b
                     "score_località": int(eval_data.get("score_località", 0)),
                     "score_crescita": int(eval_data.get("score_crescita", 0)),
                 }
+
+                motivazione = str(eval_data.get("motivazione", ""))
+                # Forza score_competenze a 0 se la motivazione indica mid/senior
+                _enforce_competenze_zero_for_senior(scores, motivazione=motivazione)
                 
                 results.append({
                     **scores,
                     "score": _calculate_final_score(scores),
-                    "motivazione": str(eval_data.get("motivazione", "")),
+                    "motivazione": motivazione,
                     "match_competenze": list(eval_data.get("match_competenze", []) or []),
                 })
             
@@ -538,7 +640,25 @@ def evaluate_jobs_batch(jobs_data: List[Dict[str, Any]], max_retries: int = 3, b
             if status is not None:
                 print(f"   HTTP status: {status}")
             
-            time.sleep(base_delay * attempt)
+            is_429 = (
+                status == 429
+                or "429" in str(e)
+                or (getattr(e, "message", "") or "").upper().find("RESOURCE_EXHAUSTED") >= 0
+            )
+            is_503 = status == 503 or "503" in str(e) or "UNAVAILABLE" in str(e).upper()
+            if is_429:
+                wait = _get_retry_seconds_from_error(e) or min(60, base_delay * (2 ** attempt))
+                if "free_tier" in str(e) or "quotaValue" in str(e) or "RPD" in str(e).upper():
+                    print(f"   ⏳ 429 quota (es. RPD free tier): attesa {wait:.0f}s")
+                else:
+                    print(f"   ⏳ 429 rilevato: attesa {wait:.0f}s prima del retry")
+                time.sleep(wait)
+            elif is_503:
+                wait = min(60, base_delay * (2 ** (attempt + 1))) # 6s → 12s → 24s
+                print(f"   ⏳ 503 modello sotto carico: attesa {wait:.0f}s, riprovo dopo")
+                time.sleep(wait)
+            else:
+                time.sleep(base_delay * attempt)
             client = _get_client()
     
     # Fallback: ritorna valutazioni con errore
@@ -560,6 +680,8 @@ def evaluate_job(row_data: Dict[str, Any], max_retries: int = 3, base_delay: flo
     Returns:
         Dizionario con i risultati della valutazione LLM
     """
+    global _rpd_exhausted_count
+
     description = row_data.get("description")
     
     if not description or not isinstance(description, str) or description.strip() == "":
@@ -580,15 +702,26 @@ def evaluate_job(row_data: Dict[str, Any], max_retries: int = 3, base_delay: flo
     # Prompt originale invariato
     prompt = (
         "Valuta la seguente offerta di lavoro in base alle istruzioni di sistema. "
-        "Rispondi esclusivamente con JSON valido senza testo extra.\n\n" 
+        "Rispondi esclusivamente con JSON valido senza testo extra.\n\n"
         + structured_data
     )
-    
-    client = _get_client()
 
     last_err: Optional[Exception] = None
+    current_key: str = ""
+    model_name: str = ""
+
     for attempt in range(1, max_retries + 1):
         try:
+            if not _project_manager:
+                raise RuntimeError("Project manager non inizializzato")
+
+            # Slot assegnato solo al primo tentativo; i retry RPM restano sullo stesso slot,
+            # mentre i retry RPD ruotano esplicitamente lo slot nel blocco di gestione errori.
+            if attempt == 1 or not current_key:
+                current_key, model_name = _project_manager.get_next_key_and_model()
+
+            client = genai.Client(api_key=current_key)
+
             response_schema = genai_types.Schema(
                 type=genai_types.Type.OBJECT,
                 required=["score_competenze", "score_azienda", "score_stipendio", 
@@ -650,7 +783,7 @@ def evaluate_job(row_data: Dict[str, Any], max_retries: int = 3, base_delay: flo
                 ],
             )
             stream = client.models.generate_content_stream(
-                model="gemini-flash-lite-latest",
+                model=model_name,
                 contents=contents,
                 config=cfg,
             )
@@ -659,6 +792,10 @@ def evaluate_job(row_data: Dict[str, Any], max_retries: int = 3, base_delay: flo
                 if getattr(chunk, "text", None):
                     accum.append(chunk.text)
             text = ("".join(accum)).strip()
+            if not text:
+                raise ValueError(
+                    "Risposta API vuota (possibile safety block, timeout o contenuto filtrato)"
+                )
             json_str = _extract_json(text)
             parsed = json.loads(json_str)
             
@@ -669,6 +806,10 @@ def evaluate_job(row_data: Dict[str, Any], max_retries: int = 3, base_delay: flo
                 "score_località": int(parsed.get("score_località", 0)),
                 "score_crescita": int(parsed.get("score_crescita", 0)),
             }
+
+            motivazione = str(parsed.get("motivazione", ""))
+            # Applica la regola: se la motivazione indica mid/senior, score_competenze deve essere 0
+            #_enforce_competenze_zero_for_senior(scores, motivazione=motivazione)
             
             final_score = _calculate_final_score(scores)
             
@@ -679,7 +820,7 @@ def evaluate_job(row_data: Dict[str, Any], max_retries: int = 3, base_delay: flo
                 "score_località": scores["score_località"],
                 "score_crescita": scores["score_crescita"],
                 "score": final_score,
-                "motivazione": str(parsed.get("motivazione", "")),
+                "motivazione": motivazione,
                 "match_competenze": list(parsed.get("match_competenze", []) or []),
             }
             return result
@@ -688,11 +829,45 @@ def evaluate_job(row_data: Dict[str, Any], max_retries: int = 3, base_delay: flo
             last_err = e
             err_type = type(e).__name__
             status = getattr(e, "status_code", None)
-            print(f"⚠️ Errore LLM al tentativo {attempt}/{max_retries}: {err_type}: {e}")
+            err_str = str(e)
+            print(f"⚠️ Errore LLM al tentativo {attempt}/{max_retries}: {err_type}: {err_str}")
             if status is not None:
                 print(f"   HTTP status: {status}")
-            time.sleep(base_delay * attempt)
-            client = _get_client()
+            is_429 = (
+                status == 429
+                or "429" in err_str
+                or (getattr(e, "message", "") or "").upper().find("RESOURCE_EXHAUSTED") >= 0
+            )
+            is_503 = status == 503 or "503" in err_str or "UNAVAILABLE" in err_str.upper()
+
+            if is_429:
+                if _is_rpd_error(err_str):
+                    # Caso 2: 429 RPD – quota per-day esaurita per questo slot
+                    print("   ⏳ 429 RPD: attesa 1s, ruoto slot key/modello")
+                    time.sleep(1)
+                    with _rpd_exhausted_lock:
+                        _rpd_exhausted_count += 1
+                        exhausted = _rpd_exhausted_count
+                    threshold = _get_rpd_exhaustion_threshold()
+                    if threshold > 0:
+                        print(f"   [RPD] Slot esauriti: {exhausted}/{threshold}")
+                        if exhausted >= threshold:
+                            print("   ⚠️ Quota RPD giornaliera esaurita per tutte le key/modelli. Uso fallback.")
+                            return FALLBACK_RESULT_RPD.copy()
+                    # Avanza esplicitamente: il prossimo attempt userà il nuovo slot
+                    if _project_manager:
+                        current_key, model_name = _project_manager.get_next_key_and_model()
+                else:
+                    # Caso 1: 429 RPM – rispetta retryDelay e resta sullo stesso slot
+                    wait = _get_retry_seconds_from_error(e) or min(60, base_delay * (2 ** attempt))
+                    print(f"   ⏳ 429 RPM: attesa {wait:.0f}s, stesso slot (key/model invariati)")
+                    time.sleep(wait)
+            elif is_503:
+                wait = min(60, 20 + base_delay * (2 ** attempt))
+                print(f"   ⏳ 503 modello sotto carico: attesa {wait:.0f}s, riprovo dopo")
+                time.sleep(wait)
+            else:
+                time.sleep(base_delay * attempt)
 
     # fallback robusto
     return {
@@ -708,17 +883,110 @@ def evaluate_job(row_data: Dict[str, Any], max_retries: int = 3, base_delay: flo
 
 
 
+def _get_retry_seconds_from_error(e: Exception) -> Optional[float]:
+    """
+    Estrae il delay di retry suggerito dall'errore API (es. 429 con 'Please retry in 59s').
+    Restituisce None se non trovato.
+    """
+    s = str(e)
+    # "Please retry in 59.504675799s." o "retry in 59s"
+    m = re.search(r"[Rr]etry in (\d+(?:\.\d+)?)\s*s", s)
+    if m:
+        return min(120, max(1, float(m.group(1))))
+    # details RetryInfo.retryDelay come "59s"
+    err = getattr(e, "error", None) or getattr(e, "details", None)
+    if isinstance(err, dict):
+        for d in err.get("details") or err.get("error", {}).get("details") or []:
+            if isinstance(d, dict) and d.get("retryDelay") is not None:
+                delay_str = str(d["retryDelay"]).strip().rstrip("s")
+                try:
+                    return min(120, max(1, float(delay_str)))
+                except ValueError:
+                    pass
+    return None
+
+
+def _get_rpd_exhaustion_threshold() -> int:
+    """
+    Calcola dinamicamente la soglia di esaurimento RPD come
+    numero di coppie key × modello disponibili.
+    """
+    try:
+        return max(0, len(GEMINI_API_KEYS) * len(SINGLE_EVAL_MODELS))
+    except Exception:
+        return 0
+
+
+def _is_rpd_error(error_message: str) -> bool:
+    """
+    True se il 429 è probabilmente dovuto a quota giornaliera (RPD) e non a RPM.
+    Si basa su parole chiave tipiche degli errori di quota giornaliera.
+    """
+    if not error_message:
+        return False
+    msg = error_message.lower()
+    rpd_keywords = ["free_tier", "quotavalue", "perday", "generaterequestsperday"]
+    return any(kw in msg for kw in rpd_keywords)
+
+
 def _extract_json(text: str) -> str:
+    """Estrae JSON robusto anche con testo extra"""
     text = text.strip()
-    # Se già JSON
+
+    # Caso 1: JSON pulito
     if text.startswith("{") and text.endswith("}"):
-        return text
-    # Cerca il primo blocco JSON
+        try:
+            json.loads(text)
+            return text
+        except json.JSONDecodeError:
+            pass  # Fallback ai metodi successivi
+
+    # Caso 2: JSON con testo extra DOPO
+    # "{ ... } \n\nAlcune note extra..."
     start = text.find("{")
+    if start == -1:
+        return "{}"
+
+    # Trova la chiusura bilanciata
+    depth = 0
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                candidate = text[start : i + 1]
+                try:
+                    json.loads(candidate)
+                    return candidate
+                except json.JSONDecodeError:
+                    continue  # Prova la prossima }
+
+    # Caso 3: JSON con testo extra PRIMA
+    # "Ecco la valutazione: { ... }"
     end = text.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        return text[start : end + 1]
-    # Ultimo resort
+    if end != -1 and end > start:
+        candidate = text[start : end + 1]
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            pass
+
+    # Caso 4: Multiple JSON objects (prendi il primo completo)
+    json_pattern = r"\{(?:[^{}]|(?:\{(?:[^{}]|(?:\{[^{}]*\})*)*\}))*\}"
+    matches = re.findall(json_pattern, text, re.DOTALL)
+
+    for match in matches:
+        try:
+            parsed = json.loads(match)
+            # Verifica che abbia la struttura attesa
+            if "evaluations" in parsed:
+                return match
+        except json.JSONDecodeError:
+            continue
+
+    # Fallback finale
     return "{}"
 
 
@@ -737,6 +1005,14 @@ def enrich_dataframe_with_llm(df: pd.DataFrame, batch_size: int = 10) -> pd.Data
     """
     if df is None or df.empty:
         return df
+
+    # Reset del contatore RPD all'inizio di ogni esecuzione per evitare stato sporco
+    global _rpd_exhausted_count
+    with _rpd_exhausted_lock:
+        _rpd_exhausted_count = 0
+    threshold = _get_rpd_exhaustion_threshold()
+    if threshold > 0:
+        print(f"🔄 Reset contatore RPD. Slot key×modello disponibili: {threshold}")
 
     new_cols = {
         "llm_score": [],
@@ -767,8 +1043,20 @@ def enrich_dataframe_with_llm(df: pd.DataFrame, batch_size: int = 10) -> pd.Data
         )
 
         for idx, row in progress_bar:
-            res = evaluate_job(row.to_dict())
-            
+            # Early termination: se tutti gli slot RPD sono esauriti, usa direttamente il fallback
+            use_fallback = False
+            threshold = _get_rpd_exhaustion_threshold()
+            if threshold > 0:
+                with _rpd_exhausted_lock:
+                    if _rpd_exhausted_count >= threshold:
+                        use_fallback = True
+
+            if use_fallback:
+                print(f"   [RPD] Soglia {threshold} raggiunta. Job {idx} skippato con fallback.")
+                res = FALLBACK_RESULT_RPD.copy()
+            else:
+                res = evaluate_job(row.to_dict())
+
             new_cols["llm_score"].append(res.get("score"))
             new_cols["llm_score_competenze"].append(res.get("score_competenze"))
             new_cols["llm_score_azienda"].append(res.get("score_azienda"))

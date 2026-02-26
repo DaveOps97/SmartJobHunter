@@ -63,7 +63,7 @@ locations = [
         # "Parma, Emilia-Romagna",  # Food tech, automotive
         "Foligno, Umbria", 
         "Perugia, Umbria",
-        "Roma, Lazio",            #
+        #"Roma, Lazio",            #
         "Napoli, Campania",        #
         "Caserta, Campania",        #
 ]
@@ -94,7 +94,7 @@ def main():
     jobspy_df = scrape_all_locations(
         locations=locations,
         search_term=jobspy_search_term,
-        hours_old=40,
+        hours_old=26,
         results_wanted=60
     ) # hours_old:results_wanted -> 26:60, 60:120, 128:150
     
@@ -121,7 +121,7 @@ def main():
     
     # === Arricchimento LLM ===
     print(f"\nProcessando {len(jobs_to_enrich)} job con LLM...")
-    enriched_jobs = enrich_dataframe_with_llm(jobs_to_enrich, batch_size=5)
+    enriched_jobs = enrich_dataframe_with_llm(jobs_to_enrich, batch_size=1)
     
     # === Salvataggio ===
     print(f"\n=== SALVATAGGIO NEL DATABASE ===")

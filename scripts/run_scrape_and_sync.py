@@ -31,7 +31,7 @@ def run_scraping() -> int:
 
 def cleanup_stale_jobs(
     db_path: Optional[str] = None,
-    low_score_retention_days: int = 7,
+    low_score_retention_days: int = 14,
     absolute_retention_days: int = 30,
     score_threshold: int = 5,
 ) -> None:
@@ -42,9 +42,9 @@ def cleanup_stale_jobs(
     
     Args:
         db_path: Path al database SQLite (default: DEFAULT_DB_PATH)
-        low_score_retention_days: Giorni di retention per job con score basso (default: 7)
-        absolute_retention_days: Giorni oltre i quali rimuovere tutti i job non applicati (default: 30)
-        score_threshold: Soglia punteggio - rimuove job con score <= threshold (default: 5)
+        low_score_retention_days: Giorni di retention per job con score basso
+        absolute_retention_days: Giorni oltre i quali rimuovere tutti i job non applicati
+        score_threshold: Soglia punteggio - rimuove job con score <= threshold
     """
     path = Path(db_path) if db_path else DEFAULT_DB_PATH
     if not path.exists():
@@ -64,7 +64,7 @@ def cleanup_stale_jobs(
                 DELETE FROM jobs
                 WHERE scraping_date IS NOT NULL
                   AND (
-                    -- Criterio 1: Score basso e vecchi di 7+ giorni
+                    -- Criterio 1: Score basso e vecchi di 14+ giorni
                     (
                         scraping_date <= ?
                         AND llm_score IS NOT NULL
@@ -114,7 +114,7 @@ def main() -> None:
     if code == 0:
         cleanup_stale_jobs(
             db_path=os.getenv("LISTSCRAPER_DB"),
-            low_score_retention_days=int(os.getenv("LOW_SCORE_RETENTION_DAYS", "7")),
+            low_score_retention_days=int(os.getenv("LOW_SCORE_RETENTION_DAYS", "14")),
             absolute_retention_days=int(os.getenv("ABSOLUTE_RETENTION_DAYS", "30")),
             score_threshold=int(os.getenv("SCORE_THRESHOLD", "5"))
         )
