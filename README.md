@@ -18,7 +18,7 @@ Il progetto utilizza un'**architettura DB-first**: lo scraping scrive direttamen
 - **SQLite**: Database relazionale embedded per storage persistente delle offerte con schema ottimizzato per query e paginazione
 - **[FastAPI](https://fastapi.tiangolo.com/)**: Framework web moderno e performante per l'API REST e servizio del frontend HTML
 - **[Uvicorn](https://www.uvicorn.org/)**: Server ASGI ad alte prestazioni per esecuzione applicazioni FastAPI
-- **[Google Gemini (genai)](https://ai.google.dev/)**: Large Language Model (Gemini Flash Lite) per arricchimento intelligente e scoring delle offerte
+- **[Google Gemini (genai)](https://ai.google.dev/)**: Large Language Model per arricchimento intelligente e scoring delle offerte
 
 ## 📁 Struttura del Progetto
 
@@ -61,7 +61,7 @@ ListScraper/
 
 ### Installazione
 
-1. **Clona il repository** (se applicabile) o naviga nella directory del progetto
+1. **Clona il repository** o naviga nella directory del progetto
 
 2. **Crea e attiva un virtual environment**:
 ```bash
@@ -78,17 +78,13 @@ pip install -r requirements.txt
 
 4. **Configura la chiave API Gemini**:
 
-   Crea un file `.env` nella root del progetto:
-```bash
-FREE_GEMINI_API_KEY=your_api_key_here
-```
+   **Google Cloud consente fino a 10 chiavi API per singolo progetto**. Nel contesto di SmartJobHunter il valore che deve essere impostato è quello della chiave da usare per il progetto corrente: se hai più progetti GCP, puoi definire variabili distinte `GEMINI_API_KEY_1`, `GEMINI_API_KEY_2`, ..., `GEMINI_API_KEY_10`.
 
-   Oppure esporta la variabile d'ambiente:
+   Per configurare la chiave di un progetto, crea un file `.env` nella root della tua copia sorgente (o esporta la variabile d'ambiente):
 ```bash
-export FREE_GEMINI_API_KEY=your_api_key_here
+# file .env
+GEMINI_API_KEY_1=your_api_key_here
 ```
-
-   **Nota**: Se usi `FREE_GEMINI_API_KEY`, il sistema applica automaticamente un rate limiting di 15 richieste/minuto. Per rate illimitati, usa `GEMINI_API_KEY`.
 
 ## 💻 Utilizzo
 
@@ -217,28 +213,28 @@ Lo script `cron/cron_ls.sh` gestisce automaticamente:
 
 Modifica `main.py` per personalizzare:
 
-- **Località**: Modifica la lista `locations` (riga ~44)
-- **Termini di ricerca**: Modifica `jobspy_search_term` (riga ~61)
+- **Località**: Modifica la lista `locations`
+- **Termini di ricerca**: Modifica `jobspy_search_term`
 - **Filtri temporali**: Modifica `hours_old` e `results_wanted` nelle chiamate di scraping
 
 ### Personalizzazione Profilo LLM
 
 Modifica `scrapers/llm.py` per personalizzare:
 
-- **Profilo professionale**: Modifica `SYSTEM_INSTRUCTIONS` (riga ~79)
+- **Profilo professionale**: Modifica `SYSTEM_INSTRUCTIONS`
 - **Preferenze**: Aggiorna la sezione "PREFERENZE" nelle istruzioni di sistema
-- **Criteri di valutazione**: Modifica i pesi nella funzione `_calculate_final_score` (riga ~133)
+- **Criteri di valutazione**: Modifica i pesi nella funzione `_calculate_final_score`
 
 ### Pulizia Automatica Database
 
 Lo script `run_scrape_and_sync.py` esegue automaticamente la pulizia del database rimuovendo:
 
-1. Job con score basso (≤5) più vecchi di 7 giorni
+1. Job con score basso (≤5) più vecchi di 14 giorni
 2. Job qualsiasi più vecchi di 30 giorni (esclusi quelli con `applied=true`)
 
 Configura tramite variabili d'ambiente:
 ```bash
-export LOW_SCORE_RETENTION_DAYS=7
+export LOW_SCORE_RETENTION_DAYS=14
 export ABSOLUTE_RETENTION_DAYS=30
 export SCORE_THRESHOLD=5
 ```
@@ -311,21 +307,3 @@ python -m scripts.migrate_db
 ```
 
 Oppure modifica direttamente `scripts/migrate_db.py` per aggiungere le colonne desiderate.
-
-## 🐛 Troubleshooting
-
-### Problema: API Key non riconosciuta
-
-Assicurati di aver esportato la variabile d'ambiente o creato il file `.env` nella root del progetto.
-
-### Problema: Rate limiting eccessivo
-
-Se usi `FREE_GEMINI_API_KEY`, il sistema applica automaticamente 15 req/min. Considera di passare a `GEMINI_API_KEY` per rate più alti.
-
-### Problema: Database locked
-
-Il database potrebbe essere bloccato da un'altra istanza. Assicurati che non ci siano altri processi in esecuzione.
-
-### Problema: Scraping fallisce
-
-Verifica la connessione internet e controlla i log in `storage/launchd.stderr.log` per dettagli sull'errore.

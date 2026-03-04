@@ -10,4 +10,5 @@ storage/*.db-*
 *.out
 __pycache__
 .cursor
+.vscode
 chrome_profile_hiringcafe

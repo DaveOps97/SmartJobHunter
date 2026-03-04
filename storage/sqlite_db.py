@@ -524,9 +524,9 @@ def get_jobs_to_enrich(jobs_df: pd.DataFrame, db_path: str = None) -> pd.DataFra
     
     if jobs_to_enrich_list:
         jobs_to_enrich = pd.concat(jobs_to_enrich_list, ignore_index=True)
-        print(f"\n=== TOTALE DA ARRICCHIRE CON LLM: {len(jobs_to_enrich)} ===")
+        # print(f"\n=== TOTALE DA ARRICCHIRE CON LLM: {len(jobs_to_enrich)} ===")
     else:
         jobs_to_enrich = pd.DataFrame()
-        print(f"\n=== NESSUN JOB DA ARRICCHIRE ===")
+        # print(f"\n=== NESSUN JOB DA ARRICCHIRE ===")
     
     return jobs_to_enrich

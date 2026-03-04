@@ -43,10 +43,9 @@ def load_env_from_root():
     if not api_keys:
         raise RuntimeError("Nessuna API key trovata nel .env")
     
-    is_free = len(api_keys) > 1 or bool(os.getenv("FREE_GEMINI_API_KEY"))
-    
+    # la variabile 'is_free' non è più necessaria (dead code eliminato)
     print(f"🔑 Progetti configurati: {len(api_keys)}")
-    initialize_api_keys(api_keys, is_free)
+    initialize_api_keys(api_keys)
 
 
 # Lista delle città italiane da cercare
@@ -98,7 +97,7 @@ def main():
         results_wanted=60
     ) # hours_old:results_wanted -> 26:60, 60:120, 128:150
     
-    print("\n=== INIZIO SCRAPING HIRINGCAFE ===")
+    # print("\n=== INIZIO SCRAPING HIRINGCAFE ===")
     hiring_df = None
     # hiring_df = fetch_hiring_cafe_dataframe(...)
     
@@ -120,8 +119,8 @@ def main():
         return
     
     # === Arricchimento LLM ===
-    print(f"\nProcessando {len(jobs_to_enrich)} job con LLM...")
-    enriched_jobs = enrich_dataframe_with_llm(jobs_to_enrich, batch_size=1)
+    # print(f"\nProcessando {len(jobs_to_enrich)} job con LLM...")
+    enriched_jobs = enrich_dataframe_with_llm(jobs_to_enrich)
     
     # === Salvataggio ===
     print(f"\n=== SALVATAGGIO NEL DATABASE ===")
@@ -136,7 +135,8 @@ def main():
             remaining_null = cur.fetchone()[0]
             print(f"📊 Job con llm_score NULL rimasti nel DB: {remaining_null}")
     except Exception as e:
-        print(f"⚠️  Errore verifica job NULL: {e}")
+        # print(f"⚠️  Errore verifica job NULL: {e}")
+        print(f"⚠️ Verifica NULL fallita")
 
 
 if __name__ == "__main__":
