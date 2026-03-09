@@ -51,14 +51,16 @@ require_command() {
 # Health check con endpoint multipli per evitare falsi negativi.
 # --connect-timeout garantisce terminazione anche se l'interfaccia di rete
 # non è ancora inizializzata dopo il wake-from-sleep.
+# Nota: 'timeout' non è disponibile su macOS nativo; --max-time e
+# --connect-timeout di curl sono sufficienti come guardia.
 check_internet() {
-    if timeout 10 curl -Is --max-time 5 --connect-timeout 5 https://1.1.1.1 >/dev/null 2>&1; then
+    if curl -Is --max-time 5 --connect-timeout 5 https://1.1.1.1 >/dev/null 2>&1; then
         return 0
     fi
-    if timeout 10 curl -Is --max-time 5 --connect-timeout 5 https://8.8.8.8 >/dev/null 2>&1; then
+    if curl -Is --max-time 5 --connect-timeout 5 https://8.8.8.8 >/dev/null 2>&1; then
         return 0
     fi
-    if timeout 10 curl -Is --max-time 5 --connect-timeout 5 https://www.google.com >/dev/null 2>&1; then
+    if curl -Is --max-time 5 --connect-timeout 5 https://www.google.com >/dev/null 2>&1; then
         return 0
     fi
     return 1
@@ -107,7 +109,8 @@ run_scraper() {
     PYTHONUNBUFFERED=1 "$PYTHON_BIN" -u -m scripts.run_scrape_and_sync &
     PYTHON_PID=$!
 
-    # Previene sleep durante l'esecuzione
+    # Previene sleep durante l'esecuzione (ri-lancia caffeinate legato al PID Python
+    # in aggiunta a quello globale già attivo in main)
     caffeinate -dims -w "$PYTHON_PID" &
     CAFFEINATE_PID=$!
 
