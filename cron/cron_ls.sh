@@ -48,23 +48,19 @@ require_command() {
     fi
 }
 
-# Health check con endpoint multipli per evitare falsi negativi
+# Health check con endpoint multipli per evitare falsi negativi.
+# --connect-timeout garantisce terminazione anche se l'interfaccia di rete
+# non è ancora inizializzata dopo il wake-from-sleep.
 check_internet() {
-    # Cloudflare DNS
-    if curl -Is --max-time 5 https://1.1.1.1 >/dev/null 2>&1; then
+    if timeout 10 curl -Is --max-time 5 --connect-timeout 5 https://1.1.1.1 >/dev/null 2>&1; then
         return 0
     fi
-    
-    # Google DNS
-    if curl -Is --max-time 5 https://8.8.8.8 >/dev/null 2>&1; then
+    if timeout 10 curl -Is --max-time 5 --connect-timeout 5 https://8.8.8.8 >/dev/null 2>&1; then
         return 0
     fi
-    
-    # Fallback su dominio pubblico
-    if curl -Is --max-time 5 https://www.google.com >/dev/null 2>&1; then
+    if timeout 10 curl -Is --max-time 5 --connect-timeout 5 https://www.google.com >/dev/null 2>&1; then
         return 0
     fi
-    
     return 1
 }
 
@@ -107,7 +103,8 @@ notify() {
 
 run_scraper() {
     set +e
-    "$PYTHON_BIN" -m scripts.run_scrape_and_sync &
+    # -u = unbuffered: forza flush immediato su stdout anche su non-TTY
+    PYTHONUNBUFFERED=1 "$PYTHON_BIN" -u -m scripts.run_scrape_and_sync &
     PYTHON_PID=$!
 
     # Previene sleep durante l'esecuzione
@@ -128,6 +125,12 @@ main() {
     require_command curl
     require_command caffeinate
     require_command osascript
+
+    # Avvia caffeinate subito per impedire il sleep durante il check rete,
+    # prima ancora che Python venga lanciato.
+    caffeinate -dims &
+    CAFFEINATE_PID=$!
+    log "caffeinate avviato (PID $CAFFEINATE_PID)"
 
     if [[ ! -x "$PYTHON_BIN" ]]; then
         log "Python virtualenv non trovato in $PYTHON_BIN"
